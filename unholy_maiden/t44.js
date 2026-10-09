@@ -1,0 +1,11 @@
+const orig=console.log; console.log=()=>{}; process.argv[2]=process.env.S||'6,26,33'; process.argv.length=3; require('./test.js'); console.log=orig;
+const vm=require('vm'); const src=require('fs').readFileSync('/mnt/user-data/outputs/plugins.js','utf8'); const ctx={}; vm.runInNewContext(src.replace('var $plugins','this.$plugins'),ctx);
+const qs=ctx.$plugins.find(p=>p.name==='QuestSystem'); PluginManager.parameters=n=>n==='QuestSystem'?qs.parameters:{};
+$gameParty.battleMembers=()=>[{hpRate:()=>1}];
+const {Planner,Recommender}=ClaudeAutoNav; const qsList=Recommender.quests(); orig('quests',qsList.length, qsList.slice(0,8).map(q=>q.v+':'+q.title).join(' | '));
+const st={}; for (const q of qsList.slice(0,12)) st[q.v]=2; st[qsList[3].v]=3; $gameVariables.value=i=>st[i]||0;
+const by=Planner.destinations(null); const r=Recommender.build(by,null);
+for (const u of r.units) orig(u.kind, u.title, u.status||'', '=>', u.item? u.item.label+' @'+u.item.map : 'X '+u.info);
+orig('board', r.board && r.board.label, 'notOrdered', r.notOrdered);
+const {Index}=ClaudeAutoNav; for (const v of [488,485,482]) orig(v, JSON.stringify((Index.questRefs[v]||[]).map(r=>[r.map,Index.maps[r.map]&&Index.maps[r.map].name,r.evId,!!by[r.map]])));
+orig('reachable', Object.keys(by).length, 'cur', $gameMap.mapId(), Index.maps[$gameMap.mapId()].name);

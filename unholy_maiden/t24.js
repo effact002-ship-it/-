@@ -1,0 +1,11 @@
+const orig=console.log; console.log=()=>{}; process.argv[2]='1,33,20'; process.argv.length=3; require('./test.js'); console.log=orig;
+const fs=require('fs');const G='/mnt/user-data/uploads/Unholy_maiden_Ver.1.0.10_PART6_Final_한국어_합본/js/plugins.js';
+const ps=fs.readFileSync(G,'utf8'); const pl=JSON.parse(ps.slice(ps.indexOf('['),ps.lastIndexOf(']')+1));
+PluginManager.parameters=n=>n==='QuestSystem'?pl.find(p=>p.name==='QuestSystem').parameters:{};
+$gameParty.battleMembers=()=>[{hpRate:()=>1}]; const qv={481:2}; $gameVariables.value=i=>qv[i]||0;
+const {Planner,Recommender,Index}=ClaudeAutoNav; const r=Recommender.build(Planner.destinations(null),null);
+const c={}; for(const g of r.groups) for(const i of g.items) c[i.cat]=(c[i.cat]||0)+1; console.log(c, 'maps', Object.keys(Index.maps).length);
+console.log('NEXT', r.next && r.next.label, '|', r.next && r.next.help);
+for (const g of r.groups) for (const i of g.items) if (i.cat==='퀘스트') console.log(' ', i.label, '@', Index.maps[i.map].name);
+const ev=Index.findEvent(1,103); console.log('herb quest NPC requires', Index.requiredItems(ev), 'sources 119', JSON.stringify(Index.itemSources(119).slice(0,3)));
+console.log('go to:', Index.maps[r.next.map].full, 'ev', r.next.evId);
