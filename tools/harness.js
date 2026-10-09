@@ -28,7 +28,7 @@ function load(opt) {
     global.Utils = { RPGMAKER_NAME: isMZ ? 'MZ' : 'MV' };
     global.PluginManager = { parameters: n => { const p = plugins.find(q => q.name === n); return p ? p.parameters : {}; } };
     global.Input = { keyMapper: {} };
-    for (const n of ['Game_Player', 'Window_ChoiceList', 'Scene_Map', 'Window_Message', 'Game_Event', 'Game_Map']) global[n] = function() {};
+    for (const n of ['Game_Player', 'Window_ChoiceList', 'Scene_Map', 'Window_Message', 'Game_Event', 'Game_Map', 'Window_NumberInput', 'Window_EventItem', 'Scene_Gameover']) global[n] = function() {};
     global.ConfigManager = { makeData() { return {}; }, applyData() {} };
     global.Graphics = { frameCount: 0 };
     global.Window_Command = class {}; global.Window_Base = class {}; global.Scene_MenuBase = class {};

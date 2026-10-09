@@ -85,7 +85,8 @@
             names: [], collectRe: null, excludeRe: null, breakableRe: null, questBoardRe: null
         },
         sideExcludeRe: /爆弾|爆發|罠|bomb|trap/i, // 지나가며 줍기에서 제외할 이벤트 이름
-        enemyContact: false          // 길을 막은 추격형 적에게 부딪혀서라도 지나갈지
+        enemyContact: false,         // 길을 막은 추격형 적에게 부딪혀서라도 지나갈지
+        ignoreEventRe: null          // 추천에서 뺄 이벤트 이름 (치트/디버그 등)
     };
     const PROF = Object.assign({}, DEFAULT_PROFILE, (typeof window !== 'undefined' && window.ClaudeAutoNavProfile) || {});
     PROF.template = Object.assign({}, DEFAULT_PROFILE.template, PROF.template || {});
@@ -183,8 +184,29 @@
         for (let yy = y - hb.u; yy <= y + hb.d; yy++) for (let xx = x - hb.l; xx <= x + hb.r; xx++) out.push([xx, yy]);
         return out;
     }
+    // 추천/활동에서 뺄 이벤트 (치트/디버그/연출용 등, 프로필)
+    const isIgnored = ev => !!(PROF.ignoreEventRe && ev && PROF.ignoreEventRe.test(ev.name || ''));
     const isChoiceCond = c => c.k === 'choice' || c.k === 'cemenu';
     const choiceToken = c => c.k === 'cemenu' ? '#ce:' + c.ce : c.text;
+    // 이동 루트 명령 시뮬레이션 (시작 방향 face 기준 순 이동량)
+    const MOVE_OPS = [1, 2, 3, 4, 5, 6, 7, 8, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22];
+    function simMoveOps(ops, face) {
+        let dx = 0, dy = 0, dir = face;
+        const ABS = { 1: 2, 2: 4, 3: 6, 4: 8 }, TURN = { 16: 2, 17: 4, 18: 6, 19: 8 };
+        const R90 = { 2: 4, 4: 8, 8: 6, 6: 2 }, L90 = { 2: 6, 6: 8, 8: 4, 4: 2 };
+        for (const op of ops) {
+            if (Array.isArray(op)) { dx += op[1]; dy += op[2]; continue; }
+            if (ABS[op]) { dir = ABS[op]; dx += DX[dir]; dy += DY[dir]; }
+            else if (op >= 5 && op <= 8) { dx += (op === 5 || op === 7) ? -1 : 1; dy += (op === 5 || op === 6) ? 1 : -1; }
+            else if (op === 12) { dx += DX[dir]; dy += DY[dir]; }
+            else if (op === 13) { dx -= DX[dir]; dy -= DY[dir]; }
+            else if (TURN[op]) dir = TURN[op];
+            else if (op === 20) dir = R90[dir];
+            else if (op === 21) dir = L90[dir];
+            else if (op === 22) dir = REV[dir];
+        }
+        return { dx, dy };
+    }
 
     //=========================================================================
     // 조건 평가
@@ -478,6 +500,12 @@
                     if (depth === 0 && p[0] === 0 && p[1] && p[1].list && p[1].list.some(mc => mc.code === 11)) out.pushSelf = true;
                     // 플레이어 이동 루트로 순간이동시키는 장치 (전송 함정/텔레포터): 순 이동량을 기록
                     if (depth === 0 && p[0] === -1 && p[1] && p[1].list) {
+                        // '앞으로/뒤로/회전'이 있는 경로(문 통과 연출 등)는 바라보는 방향에 따라 결과가 달라지므로 명령 그대로 기록
+                        const ops = p[1].list.filter(mc => MOVE_OPS.includes(mc.code)).map(mc => mc.code === 14 ? [14, (mc.parameters || [])[0] || 0, (mc.parameters || [])[1] || 0] : mc.code);
+                        if (ops.some(c => c === 12 || c === 13 || c === 20 || c === 21 || c === 22)) {
+                            out.pmove = { rel: true, ops: (out.pmove && out.pmove.ops ? out.pmove.ops : []).concat(ops), conds: conds() };
+                            break;
+                        }
                         let dx = 0, dy = 0;
                         for (const mc of p[1].list) {
                             const c = mc.code;
@@ -602,6 +630,7 @@
             if (this.built) return;
             // 맵 파일 읽기: NW.js는 fs, 그 외(브라우저 실행 등)는 동기 XHR
             let readMap;
+            this._readMap = f => readMap(f);
             try {
                 const fs = require('fs');
                 readMap = file => JSON.parse(fs.readFileSync(this.dataPath(file), 'utf8'));
@@ -711,6 +740,16 @@
                 }
             }
             this.built = true;
+        },
+
+        // 제외된 맵이라도 플레이어가 그 안에 있으면 즉석에서 분석 (컷신 맵에 남겨진 경우 등)
+        ensure(mapId) {
+            if (!this.built || this.maps[mapId] || !$dataMapInfos[mapId] || !this._readMap) return;
+            try {
+                const file = 'Map' + (mapId < 10 ? '00' : mapId < 100 ? '0' : '') + mapId + '.json';
+                this.maps[mapId] = this.compileMap($dataMapInfos[mapId], this._readMap(file));
+                NavLog.add('ENSURE map ' + mapId + ' (제외 맵이지만 현재 위치라 분석)');
+            } catch (e) { /* 무시 */ }
         },
 
         // 현재 진행 상태 기준, 지나갈 수 없는 고정 물체 칸
@@ -1070,7 +1109,20 @@
                 }
                 // 이동 루트형 텔레포터 (같은 맵 안 순간이동)
                 const pm = pg.pmove;
-                if (pm && !pg.transfers.length && (pg.trigger === 1 || pg.trigger === 2) && Math.abs(pm.dx) + Math.abs(pm.dy) >= 2 && Cond.all(pm.conds, mapId, ev.id)) {
+                if (pm && pm.rel && !pg.transfers.length && pg.prio === 1 && (pg.trigger === 0 || pg.trigger === 1 || pg.trigger === 2) && Cond.all(pm.conds, mapId, ev.id)) {
+                    // 문 통과 연출: 다가가는 방향마다 도착 칸이 다름 -> 방향별 경로
+                    for (const d of DIRS) {
+                        const sx = ev.x - DX[d], sy = ev.y - DY[d];
+                        if (sx < 0 || sy < 0 || sx >= map.w || sy >= map.h) continue;
+                        const r = simMoveOps(pm.ops, d);
+                        const tx = sx + r.dx, ty = sy + r.dy;
+                        if (Math.abs(r.dx) + Math.abs(r.dy) < 2 || tx < 0 || ty < 0 || tx >= map.w || ty >= map.h) continue;
+                        const key = mapId + ':' + ev.id + ':' + mapId + ':' + tx + ':' + ty;
+                        if (blacklist && blacklist.has(key)) continue;
+                        out.push({ key, kind: 'event', from: mapId, evId: ev.id, ex: ev.x, ey: ev.y, hb: pg.hb || ev.hb, prio: pg.prio, trigger: pg.trigger,
+                            failed: pageFailed.length ? pageFailed.slice() : null, choices: [], to: { map: mapId, x: tx, y: ty }, warp: true, spot: { x: sx, y: sy, face: d } });
+                    }
+                } else if (pm && !pm.rel && !pg.transfers.length && (pg.trigger === 1 || pg.trigger === 2) && Math.abs(pm.dx) + Math.abs(pm.dy) >= 2 && Cond.all(pm.conds, mapId, ev.id)) {
                     const tx = ev.x + pm.dx, ty = ev.y + pm.dy;
                     const key = mapId + ':' + ev.id + ':' + mapId + ':' + tx + ':' + ty;
                     if (!(blacklist && blacklist.has(key)) && tx >= 0 && ty >= 0 && tx < map.w && ty < map.h) {
@@ -1089,7 +1141,7 @@
             const out = [], pickups = [];
             for (const ev of map.events) {
                 const pg = this.activePage(map, ev);
-                if (!pg) continue;
+                if (!pg || isIgnored(ev)) continue;
                 if (this.pickupState(map, ev, pg)) {
                     pickups.push({ type: 'pickup', evId: ev.id, x: ev.x, y: ev.y, label: '[아이템] ' + pickupLabel(ev) + ' (' + ev.x + ',' + ev.y + ')', sort: 4 });
                     continue;
@@ -1209,7 +1261,10 @@
             danger: s.danger || s.transfers.some(t => Index.endingMaps && Index.endingMaps.has(t.map)),
             te: te, choices: s.choices, effects: s.effects, dsw: s.dsw, swOn: s.swOn, pmove: s.pmove || null, push: !!s.pushSelf, hev: !!s.hev, gainIds: s.gainIds, stock: s.stock,
             ssOn: s.ssOn, loseIds: s.loseIds, quest: s.quest, vops: s.vops, ssExt: s.ssExt,
-            hb: Adapt.hitbox(cmt), enemy: Adapt.isChaser(pg)
+            hb: Adapt.hitbox(cmt),
+            // 적: 추격형(YEP_EventChasePlayer) 또는 총알 판정(<projEffect>, GALV_MapProjectiles)이 있고 접촉 시 발동하는 이벤트
+            enemy: Adapt.isChaser(pg) || (/<projEffect>/i.test(cmt) && pg.trigger === 2 && !!(pg.image && pg.image.characterName)),
+            shootable: /<projEffect>/i.test(cmt)
         };
     }
     // 템플릿 이벤트 이름 규칙 (프로필)
@@ -1311,6 +1366,7 @@
 
         // 현재 위치에서 모든 도달 가능한 상태 탐색 (다익스트라)
         explore(blacklist) {
+            Index.ensure($gameMap.mapId());
             const start = { map: $gameMap.mapId(), x: $gamePlayer.x, y: $gamePlayer.y };
             // 출발 맵은 실제 게임 통행 판정(문 열기 포함)으로 계산
             let startField = null;
@@ -1365,11 +1421,11 @@
                         if (!ge) continue;
                         const pg = ge.page();
                         const fld = node === best.get(key(start)) ? startField : this._liveFrom(node.s);
-                        const p = Runner.pathFrom(fld, Runner.spotsFor(ge, pg ? pg.priorityType : e.prio));
+                        const p = Runner.pathFrom(fld, e.spot ? [e.spot] : Runner.spotsFor(ge, pg ? pg.priorityType : e.prio));
                         if (!p) continue;
                         d = p.dirs.length;
                     } else {
-                        d = this.spotDist(map, dist, e.ex, e.ey, e.prio, e.hb);
+                        d = e.spot ? dist[e.spot.y * map.w + e.spot.x] : this.spotDist(map, dist, e.ex, e.ey, e.prio, e.hb);
                         if (d < 0) continue;
                     }
                     const ns = { map: e.to.map, x: e.to.x, y: e.to.y };
@@ -1527,6 +1583,8 @@
         },
         stop(msg) {
             if (this.active) NavLog.add('STOP ' + (msg || '(정상 종료)'));
+            if (this.active) this.lastFail = /실패|찾지 못|막힘|오류|없습니다/.test(msg || '');
+            if (this.active && /수동 조작|중단했습니다/.test(msg || '') && Bot.active) Bot.stop(msg);
             this._tempTraps = false;
             this.active = false;
             this._blocked = null;
@@ -1599,7 +1657,7 @@
             if (leg) {
                 if (leg.to.map !== leg.from && $gameMap.mapId() === leg.to.map) { this.legs.shift(); this.beginLeg(); return; }
                 if ($gameMap.mapId() !== leg.from) { this.replan('예상과 다른 맵'); return; }
-                this.walkTo(leg.evId, leg.prio, () => this.triggerEvent(leg.evId, leg.prio, leg.trigger, leg.choices));
+                this.walkTo(leg.evId, leg.prio, () => this.triggerEvent(leg.evId, leg.prio, leg.trigger, leg.choices), leg.spot ? [leg.spot] : null);
             } else if (this.phase === 'walkFinal') {
                 if (this.exitTo && $gameMap.mapId() === this.exitTo) { this.finish('도착: ' + Index.maps[this.exitTo].name); return; }
                 if ($gameMap.mapId() !== this.final.map) { this.replan('목표 맵이 아님'); return; }
@@ -1970,7 +2028,7 @@
             this.path = null;
         },
 
-        walkTo(evId, prio, onArrive) {
+        walkTo(evId, prio, onArrive, fixedSpots) {
             const ge = $gameMap.event(evId);
             if (!ge || ge._erased) { this.failLeg('대상 이벤트 없음'); return; }
             if (this.frames > 60 * 120) { this.failLeg('시간 초과'); return; }
@@ -1978,7 +2036,7 @@
             // 미끄러짐/강제 이동 등으로 예상 위치에서 벗어나면 경로 재계산
             if (this.path && this.path.expect && (this.path.expect.x !== $gamePlayer.x || this.path.expect.y !== $gamePlayer.y)) this.path = null;
             if (!this.path) {
-                const r = this.liveBfs(this.spotsFor(ge, prio), evId);
+                const r = this.liveBfs(fixedSpots || this.spotsFor(ge, prio), evId);
                 if (!r) {
                     if (this.blockCount % 30 === 0) NavLog.add('NO-PATH to ev' + evId + ' at ' + ge.x + ',' + ge.y + ' (try ' + this.blockCount + ')');
                     this.blockCount++;
@@ -2131,7 +2189,7 @@
             if (this._tourLabel) msg = this._tourLabel + ' 완료 (' + ((this._tourDone || 0) + (this.picked || 0)) + '개)';
             this.tour = null; this._tourLabel = null; this._tourDone = 0;
             this.stop(msg);
-            if (NavCfg.autoChain) { this.reopen = 40; }
+            if (NavCfg.autoChain && !Bot.active) { this.reopen = 40; }
         },
 
         finishPickup() {
@@ -2352,11 +2410,24 @@
                 }
             }
 
+            // 들어가면 자동으로 시작되는 스토리 컷신 (자동 실행 페이지): 그 맵으로 이동
+            for (const m in byMap) {
+                const mid = Number(m), map = Index.maps[mid];
+                if (!map || mid === cur) continue;
+                for (const ev of map.events) {
+                    const pg = Index.activePage(map, ev);
+                    if (!pg || pg.trigger !== 3 || ev.template || pg.danger || pg.dmsgs < 3 || isIgnored(ev)) continue;
+                    if (talked[mid + ':' + ev.id + ':' + ev.pages.indexOf(pg)] || items.some(i => i.type === 'go' && i.map === mid)) continue;
+                    items.push({ type: 'go', cat: pg.hev ? 'H 이벤트' : '이벤트', prio: pg.hev ? 3.4 : 1.8, map: mid, evId: 0, hops: byMap[m][0].hops, hev: !!pg.hev, auto: true,
+                        label: (pg.hev ? '[H 이벤트] ' : '[스토리] ') + map.name + ' 진입 컷신', help: map.name + '에 들어가면 자동으로 시작되는 이벤트입니다. (대사 ' + pg.dmsgs + '개)' });
+                }
+            }
+
             for (const mid of near) {
                 const map = Index.maps[mid];
                 for (const ev of map.events) {
                     const pg = Index.activePage(map, ev);
-                    if (!pg || pg.trigger > 2) continue;
+                    if (!pg || pg.trigger > 2 || isIgnored(ev)) continue;
                     const nm = speakerName(pg.speaker) || cleanName(ev.name);
                     if (lowHp && pg.recover && pg.trigger === 0) {
                         add({ type: 'talk', cat: '회복', prio: 0, map: mid, evId: ev.id, label: '[회복] ' + (nm || map.name), help: '파티 HP가 50% 미만입니다.' });
@@ -2394,6 +2465,17 @@
                         add({ type: 'talk', cat: '이벤트', prio: 2, map: mid, evId: ev.id,
                             label: '[이벤트] ' + (nm || map.name), help: '아직 진행하지 않은 이벤트입니다. (대사 ' + pg.dmsgs + '개' + (pg.battle ? ', 전투 포함' : '') + ')' });
                         continue;
+                    }
+                    // 조사 지점: 조사/접촉하면 스위치·셀프 스위치가 바뀌는 이벤트. 그 결과로 컷신/획득/이동이 열리면 중요
+                    if (!done && pg.n > 1 && (pg.ssOn.length || pg.swOn.length) && !pg.transfers.length && !pg.battle && !pg.enemy) {
+                        const nextPg = ev.pages.find(p2 => p2 !== pg && ((p2.cond.selfSwitchValid && pg.ssOn.includes(p2.cond.selfSwitchCh)) ||
+                            (p2.cond.switch1Valid && pg.swOn.includes(p2.cond.switch1Id))));
+                        const strong = !!nextPg && (nextPg.trigger === 3 || nextPg.gain || nextPg.dmsgs >= 3 || nextPg.transfers.length > 0);
+                        if (strong || pg.dmsgs <= 2) {
+                            add({ type: 'talk', cat: '조사', prio: strong ? 2.2 : 4.6, map: mid, evId: ev.id,
+                                label: '[조사] ' + (okName(nm) || '조사 지점') + ' (' + ev.x + ',' + ev.y + ')', help: strong ? '조사하면 다음 이벤트가 이어집니다.' : '조사하면 무언가 바뀌는 지점입니다.' });
+                            continue;
+                        }
                     }
                     // 새 대화: 아직 말 걸지 않은 NPC (페이지가 바뀌면 다시 새 대화)
                     if (pg.trigger === 0 && (pg.speaker || (PROF.talkWithoutName && pg.msgs > 0)) && pg.img && pg.img[0] !== '!' && !pg.transfers.length && !done && Index.isUsefulTalk(pg, mid, ev.id)) {
@@ -2785,14 +2867,304 @@
         summary(g) {
             const c = {};
             for (const it of g.items) c[it.cat] = (c[it.cat] || 0) + 1;
-            const order = ['보고', '퀘스트', '메인', '회복', '이벤트', 'H 이벤트', '지름길', '의뢰', '대화', '아이템'];
+            const order = ['보고', '퀘스트', '메인', '회복', '이벤트', '조사', 'H 이벤트', '지름길', '의뢰', '대화', '아이템'];
             const parts = order.filter(k => c[k]).map(k => k + ' ' + c[k]);
             if (g.explore && !g.items.length) parts.push('새 지역');
             return parts.join(' · ');
         }
     };
 
-    window.ClaudeAutoNav = { Index, Planner, Runner, Recommender };
+    //=========================================================================
+    // 자동 진행 봇: 추천 -> 실행 -> 다시 추천. 선택지/대사 자동, 막힘 감시, 게임 오버 복구, 기록
+    //=========================================================================
+    const BotLog = {
+        lines: [],
+        add(msg) {
+            const pos = (typeof $gameMap !== 'undefined' && $gameMap && $gamePlayer) ? '[map ' + $gameMap.mapId() + ' ' + $gamePlayer.x + ',' + $gamePlayer.y + '] ' : '';
+            const t = new Date();
+            const ts = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2) + ':' + ('0' + t.getSeconds()).slice(-2);
+            this.lines.push(ts + ' ' + pos + msg);
+            if (this.lines.length > 3000) this.lines.splice(0, 500);
+            this.dirty = true;
+            if (typeof window !== 'undefined') window.__botlog = this.lines;
+        },
+        write(file, text) {
+            try { const fs = require('fs'), path = require('path'); fs.writeFileSync(path.join(Index.baseDir(), file), text); } catch (e) { /* 브라우저 실행 등 */ }
+        },
+        tick() { if (this.dirty && Graphics.frameCount % 120 === 0) { this.dirty = false; this.write('autonav_bot_log.txt', this.lines.join('\n')); } }
+    };
+
+    const Bot = {
+        active: false,
+        bad: {},            // 대상 키 -> 실패 횟수
+        recent: [],         // 최근 고른 대상 키
+        stats: { actions: 0, recover: 0, sleeps: 0, stuck: 0 },
+        sigHist: [],
+        idle: 0,
+        // 봇 전용 세이브 슬롯: 프로필 지정 또는 마지막 슬롯
+        get slot() { return PROF.botSaveSlot || (DataManager.maxSavefiles ? DataManager.maxSavefiles() : 20); },
+
+        start() {
+            Index.build();
+            this.active = true; this.idle = 0; this.recent = []; this.sigHist = []; this.noProg = 0; this.sleepFails = 0;
+            this.lastSave = 0; this.cur = null; this.choiceSeen = {};
+            Runner.reopen = 0;
+            BotLog.add('BOT START (봇 세이브 슬롯 ' + this.slot + ')');
+            this.save('start');
+        },
+        stop(reason, report) {
+            if (!this.active) return;
+            this.active = false;
+            BotLog.add('BOT STOP: ' + reason);
+            if (report) this.report(reason);
+            BotLog.write('autonav_bot_log.txt', BotLog.lines.join('\n'));
+            Runner.setStatus('[봇 정지] ' + reason); Runner._statusTimer = 900;
+        },
+
+        // 진행 정도 요약 (변하지 않으면 막힌 것으로 판단)
+        signature() {
+            let s = 0, n = 0;
+            const sw = $gameSwitches._data || [];
+            for (let i = 0; i < sw.length; i++) if (sw[i]) { s += i * 7; n++; }
+            const vs = $gameVariables._data || [];
+            for (let i = 0; i < vs.length; i++) if (typeof vs[i] === 'number' && !(PROF.botIgnoreVars && PROF.botIgnoreVars.includes(i))) s += (vs[i] || 0) * (i % 13 + 1);
+            const ss = $gameSelfSwitches._data || {};
+            let sc = 0; for (const k in ss) if (ss[k]) sc++;
+            const q = $gameSystem._quests ? (($gameSystem._quests.active || []).length * 100 + ($gameSystem._quests.completed || []).length) : 0;
+            let items = 0; const pi = $gameParty._items || {}; for (const k in pi) items += pi[k];
+            return [n, s, sc, q, items].join('/');
+        },
+
+        keyOf(it) { return it.map + ':' + (it.evId || 0) + ':' + it.type + ':' + (it.label || ''); },
+
+        // 다음에 할 일 고르기
+        pickNext(rec, byMap) {
+            const ok = it => it && !(this.bad[this.keyOf(it)] >= 2) && !(PROF.botManualRe && (PROF.botManualRe.test(it.label || '') || PROF.botManualRe.test((Index.maps[it.map] || {}).name || '')));
+            const cands = [];
+            for (const u of (rec.units || [])) if (u.item) cands.push(u.item);
+            if (rec.next) cands.push(rec.next);
+            const rest = [];
+            for (const g of rec.groups) for (const it of g.items) rest.push(it);
+            rest.sort((a, b) => (a.prio - b.prio) || ((a.hops || 0) - (b.hops || 0)));
+            for (const it of rest) cands.push(it);
+            for (const g of rec.groups) if (g.explore) { const em = g.exploreMap || g.map; if (em !== $gameMap.mapId() && byMap[em]) cands.push({ type: 'go', map: em, evId: 0, label: '[탐색] ' + Index.maps[em].name, prio: 7, hops: byMap[em][0].hops }); }
+            for (const it of cands) {
+                if (!ok(it)) continue;
+                // 같은 대상을 연달아 3번 고르면 다른 것
+                if (this.recent.filter(k => k === this.keyOf(it)).length >= 3) continue;
+                return it;
+            }
+            return null;
+        },
+
+        // 할 일이 없을 때: 잠자기(다음 날) 같은 시간 넘기기 이벤트
+        sleepItem(byMap) {
+            const re = PROF.botSleepChoiceRe, nre = PROF.botSleepEventRe;
+            if (!re && !nre) return null;
+            let best = null;
+            for (const m in byMap) {
+                const map = Index.maps[m]; if (!map) continue;
+                for (const ev of map.events) {
+                    const pg = Index.activePage(map, ev);
+                    if (!pg || pg.trigger > 2 || pg.danger) continue;
+                    const has = (nre && nre.test(ev.name || '') && pg.n > 1) || (re && ((pg.effects || []).some(cl => cl.some(c => c.k === 'choice' && re.test(c.text))) || pg.transfers.some(t => t.conds.some(c => c.k === 'choice' && re.test(c.text)))));
+                    if (!has) continue;
+                    const hops = Number(m) === $gameMap.mapId() ? 0 : byMap[m][0].hops;
+                    if (!best || hops < best.hops) best = { type: 'talk', map: Number(m), evId: ev.id, label: '[봇] 잠자기 (' + map.name + ')', hops, sleep: true };
+                }
+            }
+            return best;
+        },
+
+        // 추천 항목 실행 (메뉴의 onAct와 같은 계획)
+        startItem(it, byMap, field) {
+            const mapId = it.map;
+            const target = { map: mapId, evId: it.type !== 'pickupAll' && it.type !== 'go' ? it.evId : 0 };
+            let plan = null;
+            if (mapId === $gameMap.mapId()) {
+                if (target.evId) {
+                    const ge = $gameMap.event(target.evId), pg = ge && ge.page();
+                    if (ge && Runner.pathFrom(field, Runner.spotsFor(ge, pg ? pg.priorityType : 1))) plan = { legs: [], final: target, hops: 0 };
+                    else plan = Planner.plan(target, null, byMap, n => !(n.s.map === mapId && field.dist[n.s.y * field.w + n.s.x] >= 0));
+                } else if (it.type === 'pickupAll') plan = { legs: [], final: target, hops: 0 };
+                else return false; // 이미 그 맵
+            }
+            if (!plan) plan = Planner.plan(target, null, byMap);
+            if (!plan) return false;
+            let opts = {};
+            if (it.type === 'pickupAll') opts = { mode: 'pickup', queue: it.evIds };
+            else if (it.type === 'pickup') opts = { mode: 'pickup', queue: [it.evId] };
+            else if (it.type !== 'go') opts = { mode: 'talk', queue: [it.evId] };
+            this.pendingSleep = !!it.sleep;
+            Runner.start(plan, '[봇] ' + String(it.label || '').replace(/^(\[[^\]]+\]\s*)+/, ''), opts);
+            return true;
+        },
+
+        save(why) {
+            try {
+                if (!$gameSystem || $gameMap.isEventRunning() || $gameMessage.isBusy()) return;
+                $gameSystem.onBeforeSave && $gameSystem.onBeforeSave();
+                const r = DataManager.saveGame(this.slot);
+                this.lastSave = Graphics.frameCount;
+                BotLog.add('SAVE slot ' + this.slot + ' (' + why + ')' + (r === false ? ' 실패' : ''));
+            } catch (e) { BotLog.add('SAVE error ' + e); }
+        },
+
+        // 게임 오버: 봇 세이브를 불러와 다시 (실패한 대상은 제외)
+        recover() {
+            this.stats.recover++;
+            if (this.cur) this.bad[this.keyOf(this.cur)] = 9;
+            BotLog.add('GAME OVER -> 봇 세이브 불러오기 (복구 ' + this.stats.recover + '회, 실패 대상: ' + (this.cur ? this.cur.label : '-') + ')');
+            if (this.stats.recover > 5) { this.stop('게임 오버가 반복되어 정지', true); SceneManager.goto(Scene_Title); return; }
+            const done = ok => {
+                if (!ok) { this.stop('봇 세이브를 불러오지 못함', true); return; }
+                $gamePlayer.reserveTransfer($gameMap.mapId(), $gamePlayer.x, $gamePlayer.y, $gamePlayer.direction(), 0);
+                $gamePlayer.requestMapReload();
+                SceneManager.goto(Scene_Map);
+            };
+            try {
+                const r = DataManager.loadGame(this.slot);
+                if (r && typeof r.then === 'function') r.then(() => done(true), () => done(false)); else done(!!r);
+            } catch (e) { done(false); }
+        },
+
+        report(reason) {
+            this.stats.stuck++;
+            const lines = ['== 봇 막힘 보고 ' + new Date().toLocaleString() + ' ==', '이유: ' + reason,
+                '위치: map ' + $gameMap.mapId() + ' ' + (Index.maps[$gameMap.mapId()] ? Index.maps[$gameMap.mapId()].name : '') + ' (' + $gamePlayer.x + ',' + $gamePlayer.y + ')',
+                '봇 세이브 슬롯: ' + this.slot, '통계: ' + JSON.stringify(this.stats), '진행 요약: ' + this.signature(),
+                '실패 대상: ' + JSON.stringify(this.bad)];
+            try {
+                const by = Planner.destinations(null);
+                const rec = Recommender.build(by, Runner.liveField(0, false, true, {}));
+                lines.push('추천 단위: ' + JSON.stringify((rec.units || []).map(u => [u.title, u.status, u.item ? u.item.label : u.info])));
+                lines.push('기타 할 일: ' + JSON.stringify(rec.groups.map(g => [Index.maps[g.map] && Index.maps[g.map].name, g.items.map(i => i.label)])));
+                lines.push('갈 수 있는 맵: ' + Object.keys(by).length);
+            } catch (e) { lines.push('추천 계산 오류: ' + e); }
+            if ($gameSystem._quests) lines.push('퀘스트: 진행 ' + JSON.stringify($gameSystem._quests.active) + ' 완료 ' + JSON.stringify($gameSystem._quests.completed));
+            lines.push('', '== 최근 기록 ==');
+            const text = lines.concat(BotLog.lines.slice(-300)).join('\n');
+            BotLog.write('autonav_bot_report.txt', text);
+            if (typeof window !== 'undefined') window.__botreport = text;
+            NavLog.flush();
+        },
+
+        // 사격 전투 (프로필 botCombat): 같은 줄의 적을 향해 사격 키 입력
+        combat() {
+            const C = PROF.botCombat;
+            if (!C) return false;
+            if (this._fireHold > 0 && --this._fireHold === 0) Input._currentState[C.key] = false;
+            if ((C.requireSwitches || []).some(id => !$gameSwitches.value(id))) return false;
+            if ($gameMessage.isBusy() || $gamePlayer.isMoving() || (this._fireCool = (this._fireCool || 0) - 1) > 0) return false;
+            const px = $gamePlayer.x, py = $gamePlayer.y, mapId = $gameMap.mapId(), R = C.range || 6;
+            let best = null;
+            for (const ge of $gameMap.events()) {
+                if (ge._erased || !ge.page()) continue;
+                const fe = Index.findEvent(mapId, ge.eventId()), pg = fe && fe.pages[ge._pageIndex];
+                if (!pg || !pg.enemy) continue;
+                const dx = ge.x - px, dy = ge.y - py;
+                if ((dx && dy) || (!dx && !dy) || Math.abs(dx) + Math.abs(dy) > R) continue;
+                const d = dx > 0 ? 6 : dx < 0 ? 4 : dy > 0 ? 2 : 8;
+                // 사이에 막힌 칸이 없어야 함
+                let x = px, y = py, clear = true;
+                while (x !== ge.x || y !== ge.y) {
+                    if (!$gameMap.isPassable(x, y, d)) { clear = false; break; }
+                    x += DX[d]; y += DY[d];
+                }
+                if (clear && (!best || Math.abs(dx) + Math.abs(dy) < best.dist)) best = { d, dist: Math.abs(dx) + Math.abs(dy), id: ge.eventId() };
+            }
+            if (!best) return false;
+            $gamePlayer.setDirection(best.d);
+            Input._currentState[C.key] = true;
+            this._fireHold = 2; this._fireCool = C.interval || 20;
+            if (!this._lastFireLog || Graphics.frameCount - this._lastFireLog > 120) { BotLog.add('FIRE ev' + best.id + ' (거리 ' + best.dist + ')'); this._lastFireLog = Graphics.frameCount; }
+            return true;
+        },
+        enemiesOnMap() {
+            const mapId = $gameMap.mapId();
+            return $gameMap.events().filter(ge => { if (ge._erased || !ge.page()) return false; const fe = Index.findEvent(mapId, ge.eventId()), pg = fe && fe.pages[ge._pageIndex]; return pg && pg.enemy; }).length;
+        },
+
+        update() {
+            if (!this.active) return;
+            BotLog.tick();
+            if (Index.built) this.combat();
+            if (Runner.active) { this.idle = 0; this.waitEv = 0; return; }
+            // 이벤트 진행 중: 오래 끝나지 않으면 (미니게임/조작 필요) 보고
+            if ($gameMap.isEventRunning() || $gameMessage.isBusy() || $gamePlayer.isTransferring() || $gamePlayer.isMoving()) {
+                this.idle = 0;
+                this.waitEv = (this.waitEv || 0) + 1;
+                if (this.waitEv === 60 * 90) { BotLog.add('WAIT 이벤트가 90초 넘게 진행 중 (직접 조작이 필요한 장면일 수 있음)'); this.report('이벤트가 오래 끝나지 않음'); }
+                return;
+            }
+            this.waitEv = 0;
+            if (++this.idle < 30) return;
+            this.idle = 0;
+            // 직전 실행 결과
+            if (this.cur) {
+                const k = this.keyOf(this.cur);
+                if (Runner.lastFail) { this.bad[k] = (this.bad[k] || 0) + 1; BotLog.add('FAIL ' + this.cur.label + ' : ' + Runner.status); }
+                this.cur = null;
+            }
+            // 진행 감시
+            const sig = this.signature();
+            if (this.lastSig === sig) this.noProg++; else { this.noProg = 0; this.sleepFails = 0; }
+            this.lastSig = sig;
+            if (Graphics.frameCount - this.lastSave > 60 * 60 * 2 || this.noProg === 0 && this.stats.actions % 5 === 0) this.save('정기');
+            let by, field, rec;
+            try {
+                Index.build();
+                by = Planner.destinations(null);
+                field = Runner.liveField(0, false, true, { traps: NavCfg.allowTraps });
+                rec = Recommender.build(by, field);
+            } catch (e) { this.stop('추천 계산 오류: ' + e, true); return; }
+            let it = this.noProg >= 8 ? null : this.pickNext(rec, by);
+            if (this.noProg >= 8) BotLog.add('NO-PROGRESS 8회: 시간 넘기기 시도');
+            if (!it && PROF.botCombat && this.enemiesOnMap() > 0 && (this.huntWait = (this.huntWait || 0) + 1) <= 40) {
+                // 할 일이 없는데 적이 있음: 기다리며 사격 (적을 처치해야 열리는 장면)
+                if (this.huntWait % 10 === 1) BotLog.add('WAIT 적 ' + this.enemiesOnMap() + '마리, 사격하며 대기');
+                return;
+            }
+            if (it) this.huntWait = 0;
+            if (!it) {
+                it = this.sleepItem(by);
+                if (it) { this.stats.sleeps++; this.noProg = 0; this.sleepFails++; }
+                if (!it || this.sleepFails > 3) { this.stop(it ? '시간을 넘겨도 진행이 없음' : '할 일을 찾지 못함', true); return; }
+            }
+            const k = this.keyOf(it);
+            this.recent.push(k); if (this.recent.length > 12) this.recent.shift();
+            this.stats.actions++;
+            BotLog.add('DO #' + this.stats.actions + ' ' + it.label + ' @' + (Index.maps[it.map] ? Index.maps[it.map].name : it.map) + (it.evId ? ' ev' + it.evId : '') + ' (prio ' + it.prio + ', 진행 ' + sig + ')');
+            this.cur = it;
+            Runner.lastFail = false;
+            if (!this.startItem(it, by, field)) { this.bad[k] = (this.bad[k] || 0) + 1; BotLog.add('PLAN-FAIL ' + it.label); this.cur = null; }
+        },
+
+        // 선택지 자동 선택: 진행/수락 쪽 우선, 거절/취소/치트 회피, 같은 선택지가 반복되면 다른 항목
+        chooseIndex(win) {
+            const n = win.maxItems();
+            const names = []; for (let i = 0; i < n; i++) names.push(String(win.commandName(i) || ''));
+            const sigKey = $gameMap.mapId() + ':' + names.join('|');
+            const seen = this.choiceSeen[sigKey] = (this.choiceSeen[sigKey] || 0) + 1;
+            const prefer = PROF.botChoicePrefer || /네|예|좋아|수락|한다|할게|도와|가자|응|그래|yes|ok|sure|accept/i;
+            const avoid = /아니|싫|취소|그만|나중|거절|됐어|떠난|나가|^no\b|cancel|quit|leave|back/i;
+            const scored = names.map((t, i) => {
+                let s = 0;
+                if (!win.isCommandEnabled(i)) s -= 100;
+                if (this.pendingSleep && PROF.botSleepChoiceRe && PROF.botSleepChoiceRe.test(t)) s += 50;
+                if (prefer.test(t)) s += 3;
+                if (avoid.test(t)) s -= 5;
+                if (PROF.botChoiceAvoid && PROF.botChoiceAvoid.test(t)) s -= 20;
+                return { i, s, t };
+            }).sort((a, b) => (b.s - a.s) || (a.i - b.i));
+            const usable = scored.filter(x => x.s > -50);
+            const pick = usable.length ? usable[(seen - 1) % Math.min(usable.length, seen > 3 ? usable.length : 1)] : scored[0];
+            BotLog.add('CHOICE [' + names.join(' / ') + '] -> ' + pick.t + (seen > 3 ? ' (반복 ' + seen + '회, 다른 항목 시도)' : ''));
+            return pick.i;
+        }
+    };
+
+    window.ClaudeAutoNav = { Index, Planner, Runner, Recommender, Bot, BotLog };
 
     //=========================================================================
     // 게임 훅
@@ -2836,15 +3208,19 @@
             if (Runner._dirHold >= 6) { Runner._dirHold = 0; Runner.reopen = 0; Runner.stop('수동 조작으로 자동 이동을 중단했습니다'); $gameTemp.clearDestination(); }
             return;
         }
+        // 봇 대기 중 방향키 = 수동 조작으로 봇 정지
+        if (Bot.active && Input.dir4 !== 0 && this.canMove() && !$gameMessage.isBusy() && !$gameMap.isEventRunning() && !Runner.inResumeGuard()) Bot.stop('수동 조작으로 정지');
         _Game_Player_moveByInput.call(this);
     };
 
     const _Window_Message_isTriggered = Window_Message.prototype.isTriggered;
     Window_Message.prototype.isTriggered = function() {
         if (_Window_Message_isTriggered.call(this)) { this._navWait = 0; return true; }
-        if (Runner.active && NavCfg.autoText && !$gameMessage.isChoice() && !$gameMessage.isNumberInput() && !$gameMessage.isItemChoice()) {
+        // 문장 중간의 입력 대기(\!)는 뒤에 선택지가 붙어 있어도 넘김
+        const midText = this._textState && this._textState.text && this._textState.index < this._textState.text.length;
+        if ((Runner.active || Bot.active) && NavCfg.autoText && (midText || (!$gameMessage.isChoice() && !$gameMessage.isNumberInput() && !$gameMessage.isItemChoice()))) {
             this._navWait = (this._navWait || 0) + 1;
-            if (this._navWait >= NavCfg.textWait) { this._navWait = 0; return true; }
+            if (this._navWait >= (Bot.active ? 20 : NavCfg.textWait)) { this._navWait = 0; return true; }
         }
         return false;
     };
@@ -2871,6 +3247,12 @@
                 }
             }
         }
+        // 봇: 경로에 정해진 선택지가 없으면 정책에 따라 선택 (잠깐 기다린 뒤)
+        if (Bot.active && !(Runner.active && Runner.pendingChoices.length) && this.isOpen() && this.active) {
+            this._navBotWait = (this._navBotWait || 0) + 1;
+            if (this._navBotWait >= 15) { this._navBotWait = 0; this.select(Bot.chooseIndex(this)); this.processOk(); }
+            return;
+        }
         if (!Runner.active || !Runner.pendingChoices.length || !this.isOpen() || !this.active) return;
         if (/^#ce:/.test(Runner.pendingChoices[0])) return; // 공통 이벤트 메뉴용 (아래 훅에서 처리)
         const strip = s => String(s || '').replace(/^\s*if\(.+?\)/, '').replace(/\\[A-Za-z]+\[\d*\]/g, '').trim();
@@ -2885,12 +3267,61 @@
         }
     };
 
+    // 봇: 숫자 입력은 기본값으로 확정, 아이템 선택은 취소
+    const _Window_NumberInput_update = Window_NumberInput.prototype.update;
+    Window_NumberInput.prototype.update = function() {
+        _Window_NumberInput_update.call(this);
+        if (Bot.active && this.isOpen() && this.active && (this._navBotWait = (this._navBotWait || 0) + 1) >= 20) { this._navBotWait = 0; BotLog.add('NUMBER INPUT -> 확정'); this.processOk(); }
+    };
+    const _Window_EventItem_update = Window_EventItem.prototype.update;
+    Window_EventItem.prototype.update = function() {
+        _Window_EventItem_update.call(this);
+        if (Bot.active && this.isOpen() && this.active && (this._navBotWait = (this._navBotWait || 0) + 1) >= 20) { this._navBotWait = 0; BotLog.add('ITEM CHOICE -> 취소'); this.processCancel(); }
+    };
+    // 봇: 메뉴형 화면(이름 입력/상점/제작/아이템 등)이 열리면 잠시 뒤 처리 (이름은 기본값 확정, 나머지는 닫기)
+    const _Scene_MenuBase_update = Scene_MenuBase.prototype.update;
+    Scene_MenuBase.prototype.update = function() {
+        _Scene_MenuBase_update.call(this);
+        if (!Bot.active || this instanceof Scene_AutoNav || SceneManager.isSceneChanging()) return;
+        this._navBotTimer = (this._navBotTimer || 0) + 1;
+        if (this._navBotTimer !== 60) return;
+        const name = this.constructor && this.constructor.name;
+        try {
+            if (typeof Scene_Name !== 'undefined' && this instanceof Scene_Name && this.onInputOk) {
+                const ew = this._editWindow;
+                if (ew && ew.name && !ew.name() && ew.restoreDefault) ew.restoreDefault();
+                BotLog.add('SCENE ' + name + ' -> 기본 이름으로 확정 (' + (ew && ew.name ? ew.name() : '') + ')');
+                this.onInputOk();
+                return;
+            }
+        } catch (e) { BotLog.add('SCENE ' + name + ' 처리 오류 ' + e); }
+        BotLog.add('SCENE ' + name + ' -> 닫기');
+        this.popScene();
+    };
+
+    // 봇: 게임 오버 -> 봇 세이브로 복구
+    const _Scene_Gameover_start = Scene_Gameover.prototype.start;
+    Scene_Gameover.prototype.start = function() {
+        _Scene_Gameover_start.call(this);
+        this._navBotTimer = Bot.active ? 90 : 0;
+    };
+    const _Scene_Gameover_update = Scene_Gameover.prototype.update;
+    Scene_Gameover.prototype.update = function() {
+        if (this._navBotTimer > 0 && --this._navBotTimer === 0 && Bot.active) { Bot.recover(); return; }
+        _Scene_Gameover_update.call(this);
+    };
+
     // 공통 이벤트 메뉴 (YEP_CommonEventMenu: 버스 정류장 등): 목적지 공통 이벤트를 자동 선택
     if (typeof Window_CommonEventMenu !== 'undefined') {
         const _Window_CommonEventMenu_update = Window_CommonEventMenu.prototype.update;
         Window_CommonEventMenu.prototype.update = function() {
             _Window_CommonEventMenu_update.call(this);
             const want = Runner.active && Runner.pendingChoices[0];
+            if (Bot.active && (!want || !/^#ce:/.test(want)) && this.isOpen() && this.active) {
+                // 봇이 예상하지 못한 메뉴: 취소 (가능하면)
+                if ((this._navBotWait = (this._navBotWait || 0) + 1) >= 20) { this._navBotWait = 0; BotLog.add('CE-MENU 예상 밖 -> 취소'); if (this.isCancelEnabled()) this.processCancel(); else { this.select(0); this.processOk(); } }
+                return;
+            }
             if (!want || !/^#ce:/.test(want) || !this.isOpen() || !this.active) return;
             const id = Number(want.slice(4));
             for (let i = 0; i < this.maxItems(); i++) {
@@ -2909,7 +3340,7 @@
     Game_Event.prototype.start = function() {
         _Game_Event_start.apply(this, arguments);
         // 말 걸기뿐 아니라 접촉/밟기로 시작된 이벤트도 기록 (반복 이벤트 무한 추천 방지)
-        if (this._trigger <= 2 && $gameSystem) {
+        if (this._trigger <= 3 && $gameSystem) {
             $gameSystem._navTalked = $gameSystem._navTalked || {};
             $gameSystem._navTalked[this._mapId + ':' + this._eventId + ':' + this._pageIndex] = true;
         }
@@ -2947,6 +3378,8 @@
             NavLog.add('ERROR ' + (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e));
             Runner.stop('자동 진행 중 오류가 발생해 중단했습니다');
         }
+        try { Bot.update(); } catch (e) { BotLog.add('ERROR ' + (e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : e)); Bot.stop('봇 오류: ' + e, true); }
+        if (Bot.active && !Runner.active && !Runner.status) Runner.setStatus('[봇 자동 진행 중]   방향키/ESC: 정지');
         this.updateNavStatus();
         NavLog.tick();
         if (!Runner.active && navKeyTriggered() && this.canOpenAutoNav()) {
@@ -2979,10 +3412,11 @@
 
     const _Scene_Map_updateCallMenu = Scene_Map.prototype.updateCallMenu;
     Scene_Map.prototype.updateCallMenu = function() {
-        if ((Runner.active || Runner.reopen > 0) && !$gameMap.isEventRunning() && !$gameMessage.isBusy() && this.isMenuCalled()) {
+        if ((Runner.active || Runner.reopen > 0 || Bot.active) && !$gameMap.isEventRunning() && !$gameMessage.isBusy() && this.isMenuCalled()) {
             if (Runner.inResumeGuard()) { this.menuCalling = false; return; }
             Runner.reopen = 0;
             Runner.stop('자동 이동을 중단했습니다');
+            Bot.stop('메뉴 키로 정지');
             this.menuCalling = false;
             return;
         }
@@ -3180,7 +3614,10 @@
                 });
             }
             list.sort((a, b) => (a.mapId === cur ? -1 : b.mapId === cur ? 1 : a.cost - b.cost));
-            const head = [{
+            const botRow = Bot.active
+                ? { kind: 'bot', label: '■ 봇 자동 진행 정지', help: '자동 진행 봇을 멈춥니다.' }
+                : { kind: 'bot', label: '▶ 봇 자동 진행 시작', help: '추천을 따라 게임을 자동으로 진행합니다. 선택지와 대사도 자동입니다.\n방향키나 ESC로 언제든 멈출 수 있고, 기록은 autonav_bot_log.txt에 남습니다.' };
+            const head = [botRow, {
                 kind: 'rec', label: '★ 추천 진행 (' + this._rec.total + ')',
                 help: '메인 퀘스트와 진행 중인 서브 퀘스트를 퀘스트 단위로 보여줍니다.\n고른 퀘스트는 끝날 때까지 자동으로 이어서 진행합니다.'
             }];
@@ -3252,6 +3689,11 @@
         reachOf(mapId, evId) { return Planner.reach(mapId, evId, this._byMap, this._field); }
         onDest() {
             const d = this._destWindow.currentExt();
+            if (d.kind === 'bot') {
+                if (Bot.active) Bot.stop('메뉴에서 정지'); else { Bot.start(); }
+                this.popScene();
+                return;
+            }
             if (d.kind === 'cfg') {
                 if (d.key === 'doorMode') NavCfg.doorMode = ({ ask: 'pick', pick: 'force', force: 'ask' })[NavCfg.doorMode];
                 else if (d.key === 'ambush') NavCfg.ambush = ({ safe: 'pre', pre: 'off', off: 'safe' })[NavCfg.ambush] || 'safe';

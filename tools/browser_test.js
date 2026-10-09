@@ -28,6 +28,8 @@ const stub = `
 Decrypter.checkImgIgnore = function() { return true; };
 ['playBgm','playBgs','playMe','playSe','playStaticSe','replayBgm','replayBgs'].forEach(function(k){ AudioManager[k] = function(){}; });
 AudioManager.checkErrors = function(){};
+// 게임 속도 배속 (SPEED=8 등): 한 화면 프레임에 게임 갱신을 여러 번
+${process.env.SPEED ? "(function(){ var f = SceneManager._getTimeInMsWithoutMobileSafari; if (f) SceneManager._getTimeInMsWithoutMobileSafari = function(){ return f.call(this) * " + Number(process.env.SPEED) + "; }; })();" : ''}
 // 창 스킨이 빈 그림이라 글자색이 투명해지므로 테스트용 고정 색
 if (typeof Window_Base !== 'undefined' && !window.ColorManager) Window_Base.prototype.textColor = function(n){ return ['#ffffff','#20a0d6','#ff784c','#ff7878','#ffa0a0','#a0d0ff','#c080ff','#80ff80','#c0c0c0','#2080cc'][n % 10] || '#ffffff'; };
 if (typeof Graphics !== 'undefined') { Graphics.isFontLoaded = function(){ return true; }; }
@@ -64,11 +66,30 @@ const server = http.createServer((req, res) => {
     await page.goto('http://127.0.0.1:' + port + '/index.html');
     await page.waitForFunction(() => window.SceneManager && SceneManager._scene && /Title|Map/.test(SceneManager._scene.constructor.name), null, { timeout: 60000 });
     // 새 게임 시작 후 지정 위치로
-    await page.evaluate(([m, x, y]) => {
-        DataManager.setupNewGame();
-        $gamePlayer.reserveTransfer(m, x, y, 2, 0);
-        SceneManager.goto(Scene_Map);
-    }, START);
+    if (process.env.SAVE) {
+        // 세이브 불러오기 (MV: localStorage에 넣고 로드)
+        const data = fs.readFileSync(process.env.SAVE, 'utf8');
+        await page.evaluate(d => {
+            localStorage.setItem('RPG File1', d);
+            let ok = false;
+            try {
+                const json = LZString.decompressFromBase64(d.trim());
+                DataManager.createGameObjects();
+                DataManager.extractSaveContents(JsonEx.parse(json));
+                ok = true;
+            } catch (e) { console.log('LOAD ERROR ' + e.stack); }
+            console.log('LOAD ' + ok + ' map ' + $gameMap.mapId() + ' ' + $gamePlayer.x + ',' + $gamePlayer.y);
+            if ($gameSystem.versionId() !== $dataSystem.versionId) { $gamePlayer.reserveTransfer($gameMap.mapId(), $gamePlayer.x, $gamePlayer.y); $gamePlayer.requestMapReload(); }
+            else { $gamePlayer.reserveTransfer($gameMap.mapId(), $gamePlayer.x, $gamePlayer.y, $gamePlayer.direction(), 2); }
+            SceneManager.goto(Scene_Map);
+        }, data);
+    } else {
+        await page.evaluate(([m, x, y]) => {
+            DataManager.setupNewGame();
+            $gamePlayer.reserveTransfer(m, x, y, 2, 0);
+            SceneManager.goto(Scene_Map);
+        }, START);
+    }
     await page.waitForFunction(() => SceneManager._scene instanceof Scene_Map && SceneManager._scene.isActive() && !$gamePlayer.isTransferring(), null, { timeout: 30000 });
     const helpers = {
         shot: async name => { await page.screenshot({ path: path.join(OUT, name + '.png') }); },

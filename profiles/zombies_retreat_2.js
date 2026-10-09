@@ -4,8 +4,8 @@
 // HIME_HiddenChoiceConditions(지하철 노선 숨김), Galv_QuestLog(퀘스트 목표 추적), YEP_MessageCore(\n<이름>)
 ({
     name: "Zombie's Retreat 2",
-    // 1 도입부(1일 차 컷신들), 12 특별한 순간(회상), 240 크레딧, 220 오토바이 컷신/테스트
-    excludeMapIds: [1, 12, 220, 240],
+    // 12 특별한 순간(회상), 240 크레딧, 220 오토바이 컷신/테스트 (1 도입부 아래 맵은 1일 차 스토리에서 실제로 돌아다님)
+    excludeMapIds: [12, 220, 240],
     excludeMapPattern: '컷신|미사용|구버전|원본 백업|테스트|회상|크레딧|장면|^MAP\\d+$|cutscene|test|unused',
     endingRootIds: [240],
     travelItemPattern: '(?!)',
@@ -23,6 +23,14 @@
         [/집|방|아파트|숙소|다락방|저택|^\d+호/, '건물']
     ],
     talkWithoutName: true,
+    // 추천에서 뺄 이벤트: 치트 일지, 업데이트/조명 처리, 미니게임(낚시)
+    ignoreEventRe: /^Journal$|Cheat|Debug|Updater|Lighting|^Light$|Fishing/i,
+    // 봇 설정
+    botCombat: { key: 'pageup', range: 7, interval: 20, requireSwitches: [40] }, // 무기 장착(스위치 40) 상태에서 PageUp = 사격
+    botSleepChoiceRe: /잠자기|다음 날/,                 // 할 일이 없을 때 고를 '시간 넘기기' 선택지
+    botSleepEventRe: /^Sleep Icon$/,                      // 시간 넘기기 이벤트 이름 (자정에는 선택지가 '네'로 바뀜)
+    botChoiceAvoid: /치트|cheat/i,                        // 봇이 절대 고르지 않을 선택지
+    botManualRe: /보스|Boss|낚시|오토바이|콜로세움|바이올렛 컵|난투/, // 직접 해야 하는 장면(봇이 건너뜀)
     sideExcludeRe: /Zombie|Trap|Bomb|함정|폭탄/i,
     enemyContact: false
 })
