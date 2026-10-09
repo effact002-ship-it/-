@@ -738,6 +738,20 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             for (const ce of $dataCommonEvents) if (ce) addStock(scanCommon(ce.id, 1).stock || []);
             // 스위치를 켜는 이벤트 색인 (본편 목표 역추적용)
             this.switchSetters = {};
+            // 변수를 올리는 이벤트 색인 (대화 단계 같은 변수 조건 역추적용)
+            this.varSetters = {};
+            for (const id in this.maps) for (const ev of this.maps[id].events) {
+                if (ev.template) continue;
+                ev.pages.forEach((pg, pi) => {
+                    for (const o of (pg.vops || [])) {
+                        if (!(o.op === 0 || (o.op === 1 && o.val > 0))) continue;
+                        const arr = this.varSetters[o.v] = this.varSetters[o.v] || [];
+                        const ex = arr.find(r => r.map === Number(id) && r.evId === ev.id && r.page === pi);
+                        if (ex) { if (ex.condsList.length < 12) ex.condsList.push(o.conds); }
+                        else if (arr.length < 60) arr.push({ map: Number(id), evId: ev.id, page: pi, condsList: [o.conds] });
+                    }
+                });
+            }
             // 여러 곳에서 켜고 끄는 상태 스위치(무기/HUD 표시 등): 진행 조건 역추적에서 제외
             this.volatileSw = new Set(PROF.ignoreSwitches || []);
             const offCnt = {};
@@ -2497,8 +2511,9 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                         }
                         continue;
                     }
-                    // 지금은 비활성 페이지: 출현 조건 스위치를 켜는 선행 이벤트
+                    // 지금은 비활성 페이지: 출현 조건 스위치를 켜는 선행 이벤트 / 변수 조건이면 그 변수를 올리는 이벤트
                     for (const c of Index.pageCondFails(raw.cond, r.map, r.evId)) {
+                        if (c.k === 'if' && c.p[0] === 1) { this.varPrereq(c.p[1], byMap, field, add, { quest: qkey, cat: '퀘스트', prio: prio + 0.15, label: label + ' (선행 단계)', help }); continue; }
                         if (!(c.k === 'if' && c.p[0] === 0)) continue;
                         const g = this.findSetter(c.p[1], byMap, field, 1);
                         if (g) add({ quest: qkey, type: 'talk', cat: '퀘스트', prio: prio + 0.1, map: g.map, evId: g.evId, label: label + ' (선행 단계)', help });
@@ -2736,6 +2751,24 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                 }
             }
             return null;
+        },
+
+        // 변수 v를 올리는 이벤트 중 지금 할 수 있는 것을 추천 (최대 2개, 그 이벤트의 선택지 포함)
+        varPrereq(v, byMap, field, add, base) {
+            if (Index.varItem && Index.varItem[v]) return;
+            let n = 0;
+            for (const st of (Index.varSetters[v] || [])) {
+                if (n >= 2) break;
+                const map = Index.maps[st.map], ev = Index.findEvent(st.map, st.evId);
+                const raw = ev && ev.pages[st.page];
+                if (!raw || raw.danger || raw.trigger > 2 || !byMap[st.map] || Index.activePage(map, ev) !== raw) continue;
+                // 그 이벤트 안에서 지금 조건이 맞는 분기
+                const cl = st.condsList.find(cs => Cond.all(cs.filter(c => !isChoiceCond(c)), st.map, st.evId) !== false);
+                if (!cl) continue;
+                if (PROF.timeChoiceRe && cl.some(c => c.k === 'choice' && PROF.timeChoiceRe.test(c.text))) continue;
+                add(Object.assign({ type: 'talk', map: st.map, evId: st.evId, choices: cl.filter(isChoiceCond).map(choiceToken) }, base));
+                n++;
+            }
         },
 
         // 퀘스트 로그 (Galv_QuestLog) 진행 중 퀘스트: { id, name, main, st(목표 상태), cur(다음 목표 번호), objText }
@@ -3043,7 +3076,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
 
         // 다음에 할 일 고르기
         pickNext(rec, byMap) {
-            const ok = it => it && !(this.bad[this.keyOf(it)] >= 2) && !(PROF.botManualRe && (PROF.botManualRe.test(it.label || '') || PROF.botManualRe.test((Index.maps[it.map] || {}).name || '')));
+            const ok = it => it && !(this.bad[this.keyOf(it)] >= 2) && !((this.badTotal || {})[this.keyOf(it)] >= 4) && !(PROF.botManualRe && (PROF.botManualRe.test(it.label || '') || PROF.botManualRe.test((Index.maps[it.map] || {}).name || '')));
             const cands = [];
             for (const u of (rec.units || [])) if (u.item) cands.push(u.item);
             if (rec.next) cands.push(rec.next);
@@ -3244,7 +3277,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             // 직전 실행 결과
             if (this.cur) {
                 const k = this.keyOf(this.cur);
-                if (Runner.lastFail) { this.bad[k] = (this.bad[k] || 0) + 1; BotLog.add('FAIL ' + this.cur.label + ' : ' + Runner.status); }
+                if (Runner.lastFail) { this.bad[k] = (this.bad[k] || 0) + 1; this.badTotal = this.badTotal || {}; this.badTotal[k] = (this.badTotal[k] || 0) + 1; BotLog.add('FAIL ' + this.cur.label + ' : ' + Runner.status); }
                 this.cur = null;
             }
             // 진행 감시
