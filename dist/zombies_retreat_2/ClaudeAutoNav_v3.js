@@ -259,7 +259,9 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             switch (p[0]) {
                 case 0: return $gameSwitches.value(p[1]) === (p[2] === 0);
                 case 1: {
-                    const v1 = $gameVariables.value(p[1]);
+                    // 아이템 개수를 담는 변수는 지금 아이템 개수로 판단 (변수는 이벤트가 돌 때만 갱신됨)
+                    const vi = typeof Index !== 'undefined' && Index.varItem ? Index.varItem[p[1]] : undefined;
+                    const v1 = vi ? $gameParty.numItems((vi[0] === 0 ? $dataItems : vi[0] === 1 ? $dataWeapons : $dataArmors)[vi[1]]) : $gameVariables.value(p[1]);
                     const v2 = p[2] === 0 ? p[3] : $gameVariables.value(p[3]);
                     switch (p[4]) {
                         case 0: return v1 === v2; case 1: return v1 >= v2; case 2: return v1 <= v2;
@@ -560,6 +562,9 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                             if (c === 14 && mc.parameters) { dx += mc.parameters[0]; dy += mc.parameters[1]; }
                         }
                         if (dx || dy) out.pmove = { dx: (out.pmove ? out.pmove.dx : 0) + dx, dy: (out.pmove ? out.pmove.dy : 0) + dy, conds: conds() };
+                        // 선택지 갈래별 이동은 따로 기록 (네: 안쪽 / 아니오: 바깥쪽 같은 출입구)
+                        const cc = conds();
+                        if ((dx || dy) && cc.some(c => c.k === 'choice')) (out.pmoves = out.pmoves || []).push({ dx, dy, conds: cc });
                     }
                     break;
                 case 201:
@@ -762,6 +767,11 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                 }
                 if (list.length >= 3 && list.length > this.milestones.length) this.milestones = list;
             }
+            // 아이템 개수를 담는 변수: 항상 같은 아이템 개수로만 대입되는 변수 -> [종류, ID]
+            this.varItem = {};
+            const vic = this._vic = this._vic || {};
+            for (const ce of $dataCommonEvents) if (ce) this.scanVarAssign(ce.list);
+            for (const v in vic) { if (vic[v].size === 1 && !vic[v].has('x')) { const [k, iid] = [...vic[v]][0].split(':').map(Number); this.varItem[v] = [k, iid]; } }
             // 퀘스트를 진행시키는 이벤트 색인 (Galv_QuestLog: 목표 완료 / 퀘스트 완료)
             this.questAdv = {};
             for (const id in this.maps) {
@@ -791,6 +801,19 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                 }
             }
             this.built = true;
+        },
+
+        // 변수 대입 종류 수집 (아이템 개수 변수 판별용)
+        scanVarAssign(list) {
+            const vic = this._vic = this._vic || {};
+            for (const c of list || []) {
+                if (c.code !== 122) continue;
+                const q = c.parameters;
+                for (let v = q[0]; v <= q[1]; v++) {
+                    const k = q[3] === 3 && q[4] >= 0 && q[4] <= 2 ? q[4] + ':' + q[5] : 'x';
+                    (vic[v] = vic[v] || new Set()).add(k);
+                }
+            }
         },
 
         // 제외된 맵이라도 플레이어가 그 안에 있으면 즉석에서 분석 (컷신 맵에 남겨진 경우 등)
@@ -884,6 +907,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                     events.push({ id: ev.id, name: tpl ? tpl.name : '', x: ev.x, y: ev.y, template: true, pages: tpl ? tpl.pages : [] });
                     continue;
                 }
+                for (const p of ev.pages) this.scanVarAssign(p.list);
                 events.push({ id: ev.id, name: ev.name || '', x: ev.x, y: ev.y, template: false, hb: Adapt.hitbox(ev.note), pages: ev.pages.map(compilePage) });
             }
             // 고정된 물체 이벤트(통과 불가, 이동 안 함)는 정적 지도에서도 막힌 칸으로 처리
@@ -1161,6 +1185,15 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                     });
                 }
                 // 이동 루트형 텔레포터 (같은 맵 안 순간이동)
+                // 선택지 갈래별 이동 (밟는 출입구)
+                for (const bm of (pg.pmoves || [])) {
+                    if (!(pg.trigger === 1 || pg.trigger === 2) || pg.prio === 1 || !Cond.all(bm.conds, mapId, ev.id)) continue;
+                    const tx = ev.x + bm.dx, ty = ev.y + bm.dy;
+                    const key = mapId + ':' + ev.id + ':' + mapId + ':' + tx + ':' + ty;
+                    if ((blacklist && blacklist.has(key)) || tx < 0 || ty < 0 || tx >= map.w || ty >= map.h) continue;
+                    out.push({ key, kind: 'event', from: mapId, evId: ev.id, ex: ev.x, ey: ev.y, hb: pg.hb || ev.hb, prio: pg.prio, trigger: pg.trigger,
+                        failed: pageFailed.length ? pageFailed.slice() : null, choices: bm.conds.filter(isChoiceCond).map(choiceToken), to: { map: mapId, x: tx, y: ty }, warp: true, spot: { x: ev.x, y: ev.y, face: 0 } });
+                }
                 const pm = pg.pmove;
                 if (pm && pm.rel && !pg.transfers.length && pg.prio === 1 && (pg.trigger === 0 || pg.trigger === 1 || pg.trigger === 2) && Cond.all(pm.conds, mapId, ev.id)) {
                     // 문 통과 연출: 다가가는 방향마다 도착 칸이 다름 -> 방향별 경로
@@ -1175,12 +1208,15 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                         out.push({ key, kind: 'event', from: mapId, evId: ev.id, ex: ev.x, ey: ev.y, hb: pg.hb || ev.hb, prio: pg.prio, trigger: pg.trigger,
                             failed: pageFailed.length ? pageFailed.slice() : null, choices: [], to: { map: mapId, x: tx, y: ty }, warp: true, spot: { x: sx, y: sy, face: d } });
                     }
-                } else if (pm && !pm.rel && !pg.transfers.length && (pg.trigger === 1 || pg.trigger === 2) && Math.abs(pm.dx) + Math.abs(pm.dy) >= 2 && Cond.all(pm.conds, mapId, ev.id)) {
+                } else if (pm && !pm.rel && (!pg.transfers.length || pm.conds.some(isChoiceCond)) && (pg.trigger === 1 || pg.trigger === 2) &&
+                    // 밟는 이벤트(통행 가능 칸)는 한 칸 이동도 의미 있음 (출입구 선택지의 '아니오' -> 안쪽으로 밀어 넣기 등)
+                    Math.abs(pm.dx) + Math.abs(pm.dy) >= (pg.prio === 1 ? 2 : 1) && Cond.all(pm.conds, mapId, ev.id)) {
                     const tx = ev.x + pm.dx, ty = ev.y + pm.dy;
                     const key = mapId + ':' + ev.id + ':' + mapId + ':' + tx + ':' + ty;
                     if (!(blacklist && blacklist.has(key)) && tx >= 0 && ty >= 0 && tx < map.w && ty < map.h) {
                         out.push({ key, kind: 'event', from: mapId, evId: ev.id, ex: ev.x, ey: ev.y, hb: pg.hb || ev.hb, prio: pg.prio, trigger: pg.trigger,
-                            failed: pageFailed.length ? pageFailed.slice() : null, choices: [], to: { map: mapId, x: tx, y: ty }, warp: true });
+                            failed: pageFailed.length ? pageFailed.slice() : null, choices: pm.conds.filter(isChoiceCond).map(choiceToken), to: { map: mapId, x: tx, y: ty }, warp: true,
+                            spot: pg.prio !== 1 ? { x: ev.x, y: ev.y, face: 0 } : undefined });
                     }
                 }
             }
@@ -1312,7 +1348,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             transfers: s.transfers, shop: s.shop, speaker: s.speaker, msgs: s.msgs, gain: s.gain, battle: s.battle,
             vars: s.vars, changes: s.changes, recover: s.recover, dmsgs: s.dmsgs, dchanges: s.dchanges, gains: s.gains,
             danger: s.danger || s.transfers.some(t => Index.endingMaps && Index.endingMaps.has(t.map)),
-            te: te, choices: s.choices, effects: s.effects, dsw: s.dsw, swOn: s.swOn, pmove: s.pmove || null, push: !!s.pushSelf, hev: !!s.hev, gainIds: s.gainIds, stock: s.stock,
+            te: te, choices: s.choices, effects: s.effects, dsw: s.dsw, swOn: s.swOn, pmove: s.pmoves && s.pmoves.length ? null : (s.pmove || null), pmoves: s.pmoves || null, push: !!s.pushSelf, hev: !!s.hev, gainIds: s.gainIds, stock: s.stock,
             ssOn: s.ssOn, loseIds: s.loseIds, quest: s.quest, vops: s.vops, ssExt: s.ssExt, ces: s.ces, swOff: s.swOff || [],
             hb: Adapt.hitbox(cmt),
             // 적: 추격형(YEP_EventChasePlayer) 또는 총알 판정(<projEffect>, GALV_MapProjectiles)이 있고 접촉 시 발동하는 이벤트
