@@ -1,5 +1,9 @@
 # ClaudeAutoNav 인계 문서
 
+> v2.0부터 소스는 저장소 루트의 `core/ClaudeAutoNav.js`(공용 엔진) + `profiles/unholy_maiden.js`(이 게임 설정)로 나뉘었다.
+> 이 폴더의 `ClaudeAutoNav.js`는 v49 원본(참고용)이고, 배포본은 `node tools/build.js unholy_maiden <버전>`으로 만든다 (`dist/unholy_maiden/`).
+> v50(첫 공용 엔진 빌드)은 이 게임 데이터로 회귀 테스트를 아직 못 했다. 게임 `data\` 폴더와 `js\plugins.js`를 받으면 `tools/sim.js`로 확인할 것.
+
 Unholy Maiden (RPG Maker MZ) 자동 내비게이션 플러그인 개발 기록. 다른 Claude 세션이 이 폴더만 보고 이어서 작업할 수 있도록 정리함.
 
 - 게임 폴더: `D:\야겜\Unholy_maiden_Ver.1.0.10_PART6_Final_한국어_합본`
