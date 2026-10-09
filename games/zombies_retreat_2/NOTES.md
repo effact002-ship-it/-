@@ -2,17 +2,17 @@
 
 - 게임 폴더: `D:\야겜\Zombie's Retreat 2 v1.1.0 .손번역 by 아티팩트` (RPG Maker MV, 데이터는 `www\data`)
 - 프로필: `profiles/zombies_retreat_2.js`
-- 현재 배포본: `dist/zombies_retreat_2/ClaudeAutoNav_v1.js`
+- 현재 배포본: `dist/zombies_retreat_2/ClaudeAutoNav_v2.js`
 - 로그: `www\autonav_log.txt` (메뉴를 열 때와 자동 이동 중 기록)
 
 ## 설치
 
-1. `dist/zombies_retreat_2/ClaudeAutoNav_v1.js` → `www\js\plugins\`에 복사
+1. `dist/zombies_retreat_2/ClaudeAutoNav_v2.js` → `www\js\plugins\`에 복사
 2. `www\js\plugins.js`를 백업한 뒤 메모장으로 열고, 마지막 항목 뒤에 다음 줄 추가 (앞 항목 끝에 `,` 필요)
-   `{"name":"ClaudeAutoNav_v1","status":true,"description":"자동 내비게이션","parameters":{}}`
+   `{"name":"ClaudeAutoNav_v2","status":true,"description":"자동 내비게이션","parameters":{}}`
 3. 게임 재시작 후 맵에서 N 키
 
-업데이트할 때는 버전 번호를 올려 빌드(`node tools/build.js zombies_retreat_2 2`)하고 `plugins.js`의 이름만 바꾼다.
+업데이트할 때는 버전 번호를 올려 빌드(`node tools/build.js zombies_retreat_2 3`)하고 `plugins.js`의 이름만 바꾼다.
 
 ## 게임 구조 (조사 결과)
 
@@ -42,3 +42,8 @@
 - 실제 세이브 상태에서의 추천 품질 (특히 메인 퀘스트 다음 단계). 세이브 파일(`www\save\fileN.rpgsave`)과 `www\img\Quests.txt`를 받으면 `SAVE=... node tools/sim.js`로 검증 가능
 - 좀비가 길목을 완전히 막고 있을 때의 동작 (현재: 기다렸다가 다른 길, 계속 막히면 중단)
 - 은신 리전, 미끄러운 바닥(아이스링크), 낚시/제작 같은 미니게임은 자동 진행 대상 아님
+
+## 버전 기록
+
+- v1: 첫 배포. 게임 실행기(오래된 NW.js)에 `Array.prototype.flatMap`이 없어 N 키 메뉴에서 TypeError
+- v2: `flatMap`/`padStart` 사용 제거 + 오래된 실행기용 보조 코드 추가. `OLDJS=1`로 해당 기능을 지운 엔진에서 메뉴/자동 이동 확인

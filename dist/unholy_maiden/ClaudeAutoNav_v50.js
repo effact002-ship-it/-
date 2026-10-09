@@ -87,6 +87,11 @@ window.ClaudeAutoNavProfile = // Unholy Maiden (RPG Maker MZ) - v49까지 엔진
 
 (() => {
     'use strict';
+    // 오래된 NW.js(MV 게임 다수)에 없는 기능 보충
+    if (!Array.prototype.flatMap) Object.defineProperty(Array.prototype, 'flatMap', { configurable: true, writable: true, value: function(f, t) { return [].concat.apply([], this.map(f, t)); } });
+    if (!String.prototype.padStart) Object.defineProperty(String.prototype, 'padStart', { configurable: true, writable: true, value: function(n, c) { let s = String(this); c = c === undefined ? ' ' : String(c); while (s.length < n) s = c + s; return s.slice(-Math.max(n, String(this).length)); } });
+    if (!Object.entries) Object.entries = o => Object.keys(o).map(k => [k, o[k]]);
+    if (!Object.values) Object.values = o => Object.keys(o).map(k => o[k]);
     const PN = 'ClaudeAutoNav_v50';
     const P = PluginManager.parameters(PN);
 
@@ -673,7 +678,7 @@ window.ClaudeAutoNavProfile = // Unholy Maiden (RPG Maker MZ) - v49까지 엔진
             }
             for (const info of $dataMapInfos) {
                 if (!info || this.excluded[info.id]) continue;
-                const file = 'Map' + String(info.id).padStart(3, '0') + '.json';
+                const file = 'Map' + (info.id < 10 ? '00' : info.id < 100 ? '0' : '') + info.id + '.json';
                 let data;
                 try { data = readMap(file); } catch (e) { continue; }
                 this.maps[info.id] = this.compileMap(info, data);
@@ -3255,7 +3260,7 @@ window.ClaudeAutoNavProfile = // Unholy Maiden (RPG Maker MZ) - v49까지 엔진
                 const p = this.posOf(mapId, a.evId);
                 if (p) marks.push({ type: a.type === 'pickup' ? 'pickup' : a.type === 'shop' ? 'shop' : /^\[이동 장치\]/.test(a.label) ? 'device' : 'talk', x: p.x, y: p.y, evId: a.evId });
             }
-            for (const r of this._rec.groups.flatMap(g => g.items)) {
+            for (const r of [].concat.apply([], this._rec.groups.map(g => g.items))) {
                 if (r.map !== mapId || !r.evId || marks.some(k => k.evId === r.evId)) continue;
                 const p = this.posOf(mapId, r.evId);
                 if (p) marks.push({ type: 'talk', x: p.x, y: p.y, evId: r.evId });

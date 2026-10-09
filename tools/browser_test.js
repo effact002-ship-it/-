@@ -32,6 +32,7 @@ AudioManager.checkErrors = function(){};
 if (typeof Window_Base !== 'undefined' && !window.ColorManager) Window_Base.prototype.textColor = function(n){ return ['#ffffff','#20a0d6','#ff784c','#ff7878','#ffa0a0','#a0d0ff','#c080ff','#80ff80','#c0c0c0','#2080cc'][n % 10] || '#ffffff'; };
 if (typeof Graphics !== 'undefined') { Graphics.isFontLoaded = function(){ return true; }; }
 window.__errors = [];
+${process.env.OLDJS ? 'delete Array.prototype.flatMap; delete Array.prototype.flat; delete String.prototype.padStart; delete String.prototype.padEnd;' : ''}
 window.addEventListener('error', function(e){ window.__errors.push(String(e.message) + ' @' + e.filename + ':' + e.lineno); });
 `;
 const pluginsAdd = `$plugins.push({name:${JSON.stringify(pluginName)},status:true,description:'',parameters:{}});`;

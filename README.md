@@ -18,13 +18,13 @@ RPG Maker MV/MZ 게임용 자동 내비게이션 플러그인이에요. N 키로
 | 게임 | 엔진 | 프로필 | 최신 배포본 | 문서 |
 |---|---|---|---|---|
 | Unholy Maiden | MZ | `profiles/unholy_maiden.js` | `dist/unholy_maiden/ClaudeAutoNav_v50.js` | `games/unholy_maiden/HANDOFF.md` |
-| Zombie's Retreat 2 | MV | `profiles/zombies_retreat_2.js` | `dist/zombies_retreat_2/ClaudeAutoNav_v1.js` | `games/zombies_retreat_2/NOTES.md` |
+| Zombie's Retreat 2 | MV | `profiles/zombies_retreat_2.js` | `dist/zombies_retreat_2/ClaudeAutoNav_v2.js` | `games/zombies_retreat_2/NOTES.md` |
 
 ## 배포 방법
 
 NW.js가 스크립트를 캐시하므로 **매번 새 버전 번호(새 파일명)** 로 배포해요.
 
-1. 배포본 만들기: `node tools/build.js <프로필> <버전>` (예: `node tools/build.js zombies_retreat_2 2`)
+1. 배포본 만들기: `node tools/build.js <프로필> <버전>` (예: `node tools/build.js zombies_retreat_2 3`)
 2. 만들어진 `dist/<프로필>/ClaudeAutoNav_vN.js`를 게임의 플러그인 폴더에 복사
    - MZ: `<게임>/js/plugins/`
    - MV: `<게임>/www/js/plugins/` (`www` 폴더가 없는 게임은 `<게임>/js/plugins/`)
@@ -62,7 +62,7 @@ NW.js가 스크립트를 캐시하므로 **매번 새 버전 번호(새 파일�
 3. 플러그인 목록을 보고, 위 표에 없는 이동/통행 관련 플러그인이 있으면 어댑터를 추가한다.
 4. 도달 가능 지역 확인: `GAME=<폴더> PROFILE=profiles/<게임>.js node tools/reach.js`
 5. 가상 진행: `GAME=... PROFILE=... STEPS=40 node tools/sim.js` (실제 세이브로 시작하려면 `SAVE=<세이브 파일>`)
-6. 실제 엔진 테스트: `node tools/build.js <게임> 1` 후 `GAME=... PLUGIN=dist/<게임>/ClaudeAutoNav_v1.js START=맵,x,y node tools/browser_test.js`
+6. 실제 엔진 테스트: `node tools/build.js <게임> 1` 후 `GAME=... PLUGIN=dist/<게임>/ClaudeAutoNav_v2.js START=맵,x,y node tools/browser_test.js`
    - 헤드리스 크롬에서 게임 엔진을 띄우고 이미지/소리는 빈 파일로 대체해 메뉴와 자동 이동을 시험한다. 시나리오는 `SCRIPT=`로 지정.
 7. 배포하고 게임 폴더의 `autonav_log.txt`로 문제를 진단한다 (MV는 `www/autonav_log.txt`).
 
