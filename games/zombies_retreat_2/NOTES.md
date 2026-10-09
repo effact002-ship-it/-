@@ -2,14 +2,14 @@
 
 - 게임 폴더: `D:\야겜\Zombie's Retreat 2 v1.1.0 .손번역 by 아티팩트` (RPG Maker MV, 데이터는 `www\data`)
 - 프로필: `profiles/zombies_retreat_2.js`
-- 현재 배포본: `dist/zombies_retreat_2/ClaudeAutoNav_v2.js`
+- 현재 배포본: `dist/zombies_retreat_2/ClaudeAutoNav_v3.js`
 - 로그: `www\autonav_log.txt` (메뉴를 열 때와 자동 이동 중 기록)
 
 ## 설치
 
-1. `dist/zombies_retreat_2/ClaudeAutoNav_v2.js` → `www\js\plugins\`에 복사
+1. `dist/zombies_retreat_2/ClaudeAutoNav_v3.js` → `www\js\plugins\`에 복사
 2. `www\js\plugins.js`를 백업한 뒤 메모장으로 열고, 마지막 항목 뒤에 다음 줄 추가 (앞 항목 끝에 `,` 필요)
-   `{"name":"ClaudeAutoNav_v2","status":true,"description":"자동 내비게이션","parameters":{}}`
+   `{"name":"ClaudeAutoNav_v3","status":true,"description":"자동 내비게이션","parameters":{}}`
 3. 게임 재시작 후 맵에서 N 키
 
 업데이트할 때는 버전 번호를 올려 빌드(`node tools/build.js zombies_retreat_2 3`)하고 `plugins.js`의 이름만 바꾼다.
@@ -47,3 +47,12 @@
 
 - v1: 첫 배포. 게임 실행기(오래된 NW.js)에 `Array.prototype.flatMap`이 없어 N 키 메뉴에서 TypeError
 - v2: `flatMap`/`padStart` 사용 제거 + 오래된 실행기용 보조 코드 추가. `OLDJS=1`로 해당 기능을 지운 엔진에서 메뉴/자동 이동 확인
+- v3: 자동 진행 봇 추가. 헤드리스 엔진에서 사용자 세이브(1일 차)로 검증하며 수정
+  - 문 통과 연출('앞으로 n칸' 이동 경로), 그리드 출입구(선택지 갈래별 한 칸 이동), 바닥 반짝이 조사 지점, 진입 컷신, 이름 입력, 문장 중간 입력 대기, 사격 전투, 체력 회복, 잠자기/시간 경과, 날짜별 재대화, 퀘스트 로그 연동(공통 이벤트 메뉴 안의 목표 포함), 아이템 개수 변수
+  - 검증 결과: 1일 차 → 15일 차까지 자동 진행, 퀘스트 1(Brick by Brick) 완료, 퀘스트 2(Scrub Time) 첫 목표 완료, 게임 오버는 봇 세이브로 복구
+
+## 봇 현재 한계 (다음 개선 대상)
+
+- 스토리 진행이 느림: 캐릭터 대화 단계 변수(41~50)를 올리는 대화를 적극적으로 하지 않고, 조사 지점/자원 수집에 시간을 씀
+- 버려진 집(가을 들판), 창고 Z-Cola/크레인 등은 경로상 갈 수 있다고 보지만 실제로는 막혀 있어 반복 시도 (하루 2번, 전체 4번까지)
+- 보스전, 오토바이, 낚시, 콜로세움은 자동 진행 대상 아님 (botManualRe)
