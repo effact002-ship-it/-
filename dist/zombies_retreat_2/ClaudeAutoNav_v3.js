@@ -69,9 +69,12 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
     talkWithoutName: true,
     // 추천에서 뺄 이벤트: 치트 일지, 업데이트/조명 처리, 미니게임(낚시)
     ignoreEventRe: /^Journal$|Cheat|Debug|Updater|Lighting|^Light$|Fishing/i,
+    dayVar: 1,                                            // 날짜 변수: 날이 바뀌면 대화했던 캐릭터와 다시 대화 (대화 단계 변수로 스토리 진행)
     // 봇 설정
+    botHeal: { hpVar: 18, below: 1, items: [12, 5] },     // HP(변수 18)가 1 이하면 구급상자 -> 약초
     botCombat: { key: 'pageup', range: 7, interval: 20, requireSwitches: [40] }, // 무기 장착(스위치 40) 상태에서 PageUp = 사격
     botSleepChoiceRe: /잠자기|다음 날/,                 // 할 일이 없을 때 고를 '시간 넘기기' 선택지
+    botTimeCe: [11, 6],                                   // 시간을 넘기는 공통 이벤트: 11 다음 날, 6 시간 경과(그리드 출구)
     botSleepEventRe: /^Sleep Icon$/,                      // 시간 넘기기 이벤트 이름 (자정에는 선택지가 '네'로 바뀜)
     botChoiceAvoid: /치트|cheat/i,                        // 봇이 절대 고르지 않을 선택지
     botManualRe: /보스|Boss|낚시|오토바이|콜로세움|바이올렛 컵|난투/, // 직접 해야 하는 장면(봇이 건너뜀)
@@ -355,7 +358,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
     //=========================================================================
     const ceCache = {};
     function scanList(list, depth) {
-        const out = { transfers: [], shop: null, speaker: '', msgs: 0, gain: false, battle: false, vars: [], changes: false, recover: false, dmsgs: 0, dchanges: false, gains: [], danger: false, choices: false, effects: [], dsw: false, selVars: [], wanted: [], swOn: [], gainIds: [], stock: [], ssOn: [], loseIds: [], quest: [], vops: [], ssExt: [] };
+        const out = { transfers: [], shop: null, speaker: '', msgs: 0, gain: false, battle: false, vars: [], changes: false, recover: false, dmsgs: 0, dchanges: false, gains: [], danger: false, choices: false, effects: [], dsw: false, selVars: [], wanted: [], swOn: [], gainIds: [], stock: [], ssOn: [], loseIds: [], quest: [], vops: [], ssExt: [], ces: [] };
         if (!list) return out;
         // 선택지 -> 변수 대입 -> 나중에 변수 값으로 분기하는 메뉴 (지하철 노선 등): 변수 값 -> 그 선택지 조건
         const chVar = {};
@@ -434,6 +437,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                             const mc = { k: 'cemenu', ce: id, vis: ceMenuVisible(id) };
                             const c0 = conds().concat([mc]);
                             for (const t of ce.transfers) out.transfers.push({ map: t.map, x: t.x, y: t.y, conds: c0.concat(t.conds), msgs: msgs + t.msgs, ce: id });
+                            for (const q of (ce.quest || [])) if (out.quest.length < 12) out.quest.push({ op: q.op, q: q.q, o: q.o, conds: c0.concat(q.conds) });
                         }
                         if (depth === 0) out.choices = true;
                     }
@@ -499,6 +503,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                     out.battle = true;
                     break;
                 case 121:
+                    if (p[2] === 1) { out.swOff = out.swOff || []; for (let v = p[0]; v <= p[1] && out.swOff.length < 24; v++) if (!out.swOff.includes(v)) out.swOff.push(v); }
                     if (p[2] === 0) for (let v = p[0]; v <= p[1] && out.swOn.length < 24; v++) if (!out.swOn.includes(v)) out.swOn.push(v);
                     if (p[2] === 0) { out.changes = true; if (depth === 0) { out.dchanges = true; out.dsw = true; } effect(); }
                     break;
@@ -575,6 +580,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                     if (p[1] === 'openShop' && !out.shop) out.shop = { goods: [], name: p[3] && p[3].shopName ? String(p[3].shopName) : '', conds: conds() };
                     break;
                 case 117:
+                    if (out.ces.length < 12 && !out.ces.includes(p[0])) out.ces.push(p[0]);
                     if (H_CE_RE && typeof $dataCommonEvents !== 'undefined' && $dataCommonEvents[p[0]] && H_CE_RE.test($dataCommonEvents[p[0]].name || '')) out.hev = true;
                     if (depth < 3) {
                         const ce = scanCommon(p[0], depth + 1);
@@ -727,6 +733,12 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             for (const ce of $dataCommonEvents) if (ce) addStock(scanCommon(ce.id, 1).stock || []);
             // 스위치를 켜는 이벤트 색인 (본편 목표 역추적용)
             this.switchSetters = {};
+            // 여러 곳에서 켜고 끄는 상태 스위치(무기/HUD 표시 등): 진행 조건 역추적에서 제외
+            this.volatileSw = new Set(PROF.ignoreSwitches || []);
+            const offCnt = {};
+            for (const id in this.maps) for (const ev of this.maps[id].events) for (const pg of ev.pages) for (const v of (pg.swOff || [])) offCnt[v] = (offCnt[v] || 0) + 1;
+            for (const ce of $dataCommonEvents) if (ce) for (const c of ce.list || []) if (c.code === 121 && c.parameters[2] === 1) for (let v = c.parameters[0]; v <= c.parameters[1]; v++) offCnt[v] = (offCnt[v] || 0) + 1;
+            for (const v in offCnt) if (offCnt[v] >= 3) this.volatileSw.add(Number(v));
             for (const id in this.maps) {
                 for (const ev of this.maps[id].events) {
                     ev.pages.forEach((pg, pi) => {
@@ -884,12 +896,14 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             }
             // 피해 칸: 대미지 바닥 타일, 또는 이 맵의 평행 처리가 대미지를 주는 지형 태그
             const haz = new Uint8Array(w * h);
+            const ctr = new Uint8Array(w * h); // 카운터 타일 (건너편에서 말 걸기 가능)
             for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
                 let tag = 0, dmg = false;
                 for (let z = 3; z >= 0; z--) {
                     const f = flags[d[(z * h + y) * w + x] || 0] || 0;
                     if (!tag && (f >> 12)) tag = f >> 12;
                     if (f & 0x100) dmg = true;
+                    if (f & 0x80) ctr[y * w + x] = 1;
                 }
                 if (dmg || (tag && hazTags.includes(tag))) haz[y * w + x] = 1;
                 if (Adapt.slipRegions.length && Adapt.slipRegions.includes(d[(5 * h + y) * w + x] || 0)) haz[y * w + x] = 1;
@@ -904,7 +918,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                     if (r === OVER.over || r === OVER.gate) { ovr = ovr || new Uint8Array(w * h); ovr[i] = r === OVER.over ? 1 : 2; }
                 }
             }
-            return { id: info.id, name, full: top && top !== name ? top + ' > ' + name : name, w, h, pass, events, haz, hazTags, ovr };
+            return { id: info.id, name, full: top && top !== name ? top + ' > ' + name : name, w, h, pass, events, haz, hazTags, ovr, ctr };
         },
 
         _tplCache: {},
@@ -1299,7 +1313,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             vars: s.vars, changes: s.changes, recover: s.recover, dmsgs: s.dmsgs, dchanges: s.dchanges, gains: s.gains,
             danger: s.danger || s.transfers.some(t => Index.endingMaps && Index.endingMaps.has(t.map)),
             te: te, choices: s.choices, effects: s.effects, dsw: s.dsw, swOn: s.swOn, pmove: s.pmove || null, push: !!s.pushSelf, hev: !!s.hev, gainIds: s.gainIds, stock: s.stock,
-            ssOn: s.ssOn, loseIds: s.loseIds, quest: s.quest, vops: s.vops, ssExt: s.ssExt,
+            ssOn: s.ssOn, loseIds: s.loseIds, quest: s.quest, vops: s.vops, ssExt: s.ssExt, ces: s.ces, swOff: s.swOff || [],
             hb: Adapt.hitbox(cmt),
             // 적: 추격형(YEP_EventChasePlayer) 또는 총알 판정(<projEffect>, GALV_MapProjectiles)이 있고 접촉 시 발동하는 이벤트
             enemy: Adapt.isChaser(pg) || (/<projEffect>/i.test(cmt) && pg.trigger === 2 && !!(pg.image && pg.image.characterName)),
@@ -1397,7 +1411,10 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                 if (prio !== 1) take(at(tx, ty));
                 for (const d of DIRS) {
                     take(at(tx - DX[d], ty - DY[d]));
-                    take(at(tx - 2 * DX[d], ty - 2 * DY[d]) >= 0 && prio === 1 ? at(tx - 2 * DX[d], ty - 2 * DY[d]) + 1 : -1);
+                    // 카운터 건너편 (가운데 칸이 카운터일 때만)
+                    const mx = tx - DX[d], my = ty - DY[d];
+                    const isCtr = map.ctr && mx >= 0 && my >= 0 && mx < w && my < h && map.ctr[my * w + mx];
+                    if (prio === 1 && isCtr && at(tx - 2 * DX[d], ty - 2 * DY[d]) >= 0) take(at(tx - 2 * DX[d], ty - 2 * DY[d]) + 1);
                 }
             }
             return best;
@@ -1608,6 +1625,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             this.side = null; this.sideDone = new Set(); this._sidePos = null;
             this._blocked = null;
             this.exitTo = opts.exitTo || 0;
+            this.finalChoices = opts.choices || [];
             this.tour = opts.tour || null;
             this._tourLabel = opts.tourLabel || null;
             if (!opts.tour) this._tourDone = 0;
@@ -1721,7 +1739,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                 const pg = ge.page();
                 const prio = pg ? pg.priorityType : 1;
                 this.walkTo(id, prio, () => {
-                    this.triggerEvent(id, prio, 0, []);
+                    this.triggerEvent(id, prio, 0, this.queue.length <= 1 ? this.finalChoices : []);
                     this.phase = 'triggeredFinal';
                 });
             }
@@ -2364,7 +2382,10 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             };
             const near = Object.keys(byMap).map(Number).filter(m => Index.maps[m] && byMap[m][0].hops <= 4);
             const lowHp = this.partyHpRate() < 0.5;
-            const talked = ($gameSystem && $gameSystem._navTalked) || {};
+            const talkedRaw = ($gameSystem && $gameSystem._navTalked) || {};
+            const today = PROF.dayVar ? 'd' + $gameVariables.value(PROF.dayVar) : null;
+            // 오늘 이미 한 것만 '완료' (날짜 변수 없으면 한 번 하면 완료)
+            const talked = new Proxy(talkedRaw, { get: (o, k) => { const v = o[k]; return v === true ? !today : (!!v && (!today || v === today)); } });
 
             // 퀘스트: 보고 가능 > 진행 가능 > 필요한 물품 구하기
             let notOrdered = 0;
@@ -2433,7 +2454,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                     if (Index.activePage(map, ev) === raw) {
                         if (Cond.all(r.conds, r.map, r.evId) === false) continue;
                         if (raw.trigger <= 2) {
-                            add({ quest: qkey, type: 'talk', cat: '퀘스트', prio, map: r.map, evId: r.evId, label, help });
+                            add({ quest: qkey, type: 'talk', cat: '퀘스트', prio, map: r.map, evId: r.evId, label, help, choices: (r.conds || []).filter(isChoiceCond).map(choiceToken) });
                         } else if (byMap[r.map] && r.map !== cur && !items.some(i => i.quest === qkey && i.map === r.map)) {
                             // 자동 실행 이벤트: 그 맵에 들어가면 진행됨
                             items.push({ quest: qkey, type: 'go', cat: '퀘스트', prio, map: r.map, evId: 0, hops: byMap[r.map][0].hops, label: label + ' (' + map.name + '으로 이동)', help });
@@ -2661,7 +2682,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
         // 스위치 sw를 켜는 이벤트 중 지금 진행 가능한 것. 막혀 있으면 그 페이지 조건 스위치를 켜는 이벤트로 거슬러 올라감
         findSetter(sw, byMap, field, depth, seen) {
             seen = seen || new Set();
-            if (depth > 4 || seen.has(sw)) return null;
+            if (depth > 4 || seen.has(sw) || (Index.volatileSw && Index.volatileSw.has(sw))) return null;
             seen.add(sw);
             for (const st of (Index.switchSetters[sw] || [])) {
                 const map = Index.maps[st.map], ev = Index.findEvent(st.map, st.evId);
@@ -2940,15 +2961,23 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
         stats: { actions: 0, recover: 0, sleeps: 0, stuck: 0 },
         sigHist: [],
         idle: 0,
-        // 봇 전용 세이브 슬롯: 프로필 지정 또는 마지막 슬롯
-        get slot() { return PROF.botSaveSlot || (DataManager.maxSavefiles ? DataManager.maxSavefiles() : 20); },
+        // 봇 세이브는 게임 슬롯을 쓰지 않고 별도 파일(save/autonav_bot.rpgsave)에 저장 -> 사용자/자동 저장 슬롯과 충돌 없음
+        slot: 'save/autonav_bot.rpgsave',
+        writeSave(data) {
+            try { const fs = require('fs'), path = require('path'); const f = path.join(Index.baseDir(), this.slot); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, data); return true; }
+            catch (e) { try { localStorage.setItem('ClaudeAutoNavBot', data); return true; } catch (e2) { return false; } }
+        },
+        readSave() {
+            try { const fs = require('fs'), path = require('path'); return fs.readFileSync(path.join(Index.baseDir(), this.slot), 'utf8'); }
+            catch (e) { try { return localStorage.getItem('ClaudeAutoNavBot'); } catch (e2) { return null; } }
+        },
 
         start() {
             Index.build();
             this.active = true; this.idle = 0; this.recent = []; this.sigHist = []; this.noProg = 0; this.sleepFails = 0;
             this.lastSave = 0; this.cur = null; this.choiceSeen = {};
             Runner.reopen = 0;
-            BotLog.add('BOT START (봇 세이브 슬롯 ' + this.slot + ')');
+            BotLog.add('BOT START (봇 세이브: ' + this.slot + ')');
             this.save('start');
         },
         stop(reason, report) {
@@ -2996,11 +3025,26 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             return null;
         },
 
-        // 할 일이 없을 때: 잠자기(다음 날) 같은 시간 넘기기 이벤트
+        // 할 일이 없을 때: 잠자기(다음 날) 같은 시간 넘기기 이벤트. 없으면 시간 경과 이벤트(프로필 botTimeCe)
         sleepItem(byMap) {
             const re = PROF.botSleepChoiceRe, nre = PROF.botSleepEventRe;
-            if (!re && !nre) return null;
+            if (!re && !nre && !PROF.botTimeCe) return null;
             let best = null;
+            const timeCe = PROF.botTimeCe || [];
+            const timeItem = () => {
+                let t = null;
+                for (const m in byMap) {
+                    const map = Index.maps[m]; if (!map) continue;
+                    for (const ev of map.events) {
+                        const pg = Index.activePage(map, ev);
+                        if (!pg || pg.trigger > 2 || pg.danger || !(pg.ces || []).some(c => timeCe.includes(c))) continue;
+                        if (this.bad[m + ':' + ev.id + ':time'] >= 2) continue;
+                        const hops = Number(m) === $gameMap.mapId() ? 0 : byMap[m][0].hops;
+                        if (!t || hops < t.hops) t = { type: 'talk', map: Number(m), evId: ev.id, label: '[봇] 시간 보내기 (' + map.name + ' ' + (ev.name || '') + ')', hops, timeKey: m + ':' + ev.id + ':time' };
+                    }
+                }
+                return t;
+            };
             for (const m in byMap) {
                 const map = Index.maps[m]; if (!map) continue;
                 for (const ev of map.events) {
@@ -3012,7 +3056,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                     if (!best || hops < best.hops) best = { type: 'talk', map: Number(m), evId: ev.id, label: '[봇] 잠자기 (' + map.name + ')', hops, sleep: true };
                 }
             }
-            return best;
+            return best || timeItem();
         },
 
         // 추천 항목 실행 (메뉴의 onAct와 같은 계획)
@@ -3033,7 +3077,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             let opts = {};
             if (it.type === 'pickupAll') opts = { mode: 'pickup', queue: it.evIds };
             else if (it.type === 'pickup') opts = { mode: 'pickup', queue: [it.evId] };
-            else if (it.type !== 'go') opts = { mode: 'talk', queue: [it.evId] };
+            else if (it.type !== 'go') opts = { mode: 'talk', queue: [it.evId], choices: it.choices || [] };
             this.pendingSleep = !!it.sleep;
             Runner.start(plan, '[봇] ' + String(it.label || '').replace(/^(\[[^\]]+\]\s*)+/, ''), opts);
             return true;
@@ -3043,35 +3087,36 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             try {
                 if (!$gameSystem || $gameMap.isEventRunning() || $gameMessage.isBusy()) return;
                 $gameSystem.onBeforeSave && $gameSystem.onBeforeSave();
-                const r = DataManager.saveGame(this.slot);
+                const data = LZString.compressToBase64(JsonEx.stringify(DataManager.makeSaveContents()));
+                const ok = this.writeSave(data);
                 this.lastSave = Graphics.frameCount;
-                BotLog.add('SAVE slot ' + this.slot + ' (' + why + ')' + (r === false ? ' 실패' : ''));
+                BotLog.add('SAVE ' + this.slot + ' (' + why + ')' + (ok ? '' : ' 실패'));
             } catch (e) { BotLog.add('SAVE error ' + e); }
         },
 
         // 게임 오버: 봇 세이브를 불러와 다시 (실패한 대상은 제외)
         recover() {
             this.stats.recover++;
-            if (this.cur) this.bad[this.keyOf(this.cur)] = 9;
+            if (this.cur) this.bad[this.keyOf(this.cur)] = (this.bad[this.keyOf(this.cur)] || 0) + 1; // 몇 번은 다시 시도 (전투는 운이 따름)
             BotLog.add('GAME OVER -> 봇 세이브 불러오기 (복구 ' + this.stats.recover + '회, 실패 대상: ' + (this.cur ? this.cur.label : '-') + ')');
-            if (this.stats.recover > 5) { this.stop('게임 오버가 반복되어 정지', true); SceneManager.goto(Scene_Title); return; }
-            const done = ok => {
-                if (!ok) { this.stop('봇 세이브를 불러오지 못함', true); return; }
+            if (this.stats.recover > 8) { this.stop('게임 오버가 반복되어 정지', true); SceneManager.goto(Scene_Title); return; }
+            try {
+                const data = this.readSave();
+                if (!data) throw new Error('봇 세이브 없음');
+                DataManager.createGameObjects();
+                DataManager.extractSaveContents(JsonEx.parse(LZString.decompressFromBase64(data)));
                 $gamePlayer.reserveTransfer($gameMap.mapId(), $gamePlayer.x, $gamePlayer.y, $gamePlayer.direction(), 0);
                 $gamePlayer.requestMapReload();
                 SceneManager.goto(Scene_Map);
-            };
-            try {
-                const r = DataManager.loadGame(this.slot);
-                if (r && typeof r.then === 'function') r.then(() => done(true), () => done(false)); else done(!!r);
-            } catch (e) { done(false); }
+                this.cur = null; this.idle = 0;
+            } catch (e) { this.stop('봇 세이브를 불러오지 못함: ' + e, true); }
         },
 
         report(reason) {
             this.stats.stuck++;
             const lines = ['== 봇 막힘 보고 ' + new Date().toLocaleString() + ' ==', '이유: ' + reason,
                 '위치: map ' + $gameMap.mapId() + ' ' + (Index.maps[$gameMap.mapId()] ? Index.maps[$gameMap.mapId()].name : '') + ' (' + $gamePlayer.x + ',' + $gamePlayer.y + ')',
-                '봇 세이브 슬롯: ' + this.slot, '통계: ' + JSON.stringify(this.stats), '진행 요약: ' + this.signature(),
+                '봇 세이브: ' + this.slot + ' (이 파일과 보고서를 보내 주시면 같은 지점부터 재현할 수 있음)', '통계: ' + JSON.stringify(this.stats), '진행 요약: ' + this.signature(),
                 '실패 대상: ' + JSON.stringify(this.bad)];
             try {
                 const by = Planner.destinations(null);
@@ -3119,6 +3164,27 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             if (!this._lastFireLog || Graphics.frameCount - this._lastFireLog > 120) { BotLog.add('FIRE ev' + best.id + ' (거리 ' + best.dist + ')'); this._lastFireLog = Graphics.frameCount; }
             return true;
         },
+        // 회복 (프로필 botHeal: { hpVar, below, items }): 체력 변수가 낮으면 회복 아이템 사용
+        heal() {
+            const H = PROF.botHeal;
+            if (!H || $gameMap.isEventRunning() || $gameMessage.isBusy()) return false;
+            if ($gameVariables.value(H.hpVar) > H.below || (this._healCool = (this._healCool || 0) - 1) > 0) return false;
+            for (const id of H.items) {
+                const it = $dataItems[id];
+                if (!it || !$gameParty.hasItem(it)) continue;
+                const ef = it.effects.find(e => e.code === 44);
+                if (it.consumable) $gameParty.consumeItem(it);
+                if (ef) $gameTemp.reserveCommonEvent(ef.dataId);
+                this._healCool = 300;
+                BotLog.add('HEAL ' + it.name + ' (HP ' + $gameVariables.value(H.hpVar) + ')');
+                return true;
+            }
+            return false;
+        },
+        enemyClose(r) {
+            const mapId = $gameMap.mapId(), px = $gamePlayer.x, py = $gamePlayer.y;
+            return $gameMap.events().some(ge => { if (ge._erased || !ge.page() || Math.abs(ge.x - px) + Math.abs(ge.y - py) > r) return false; const fe = Index.findEvent(mapId, ge.eventId()), pg = fe && fe.pages[ge._pageIndex]; return pg && pg.enemy; });
+        },
         enemiesOnMap() {
             const mapId = $gameMap.mapId();
             return $gameMap.events().filter(ge => { if (ge._erased || !ge.page()) return false; const fe = Index.findEvent(mapId, ge.eventId()), pg = fe && fe.pages[ge._pageIndex]; return pg && pg.enemy; }).length;
@@ -3127,7 +3193,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
         update() {
             if (!this.active) return;
             BotLog.tick();
-            if (Index.built) this.combat();
+            if (Index.built) { this.combat(); this.heal(); }
             if (Runner.active) { this.idle = 0; this.waitEv = 0; return; }
             // 이벤트 진행 중: 오래 끝나지 않으면 (미니게임/조작 필요) 보고
             if ($gameMap.isEventRunning() || $gameMessage.isBusy() || $gamePlayer.isTransferring() || $gamePlayer.isMoving()) {
@@ -3146,10 +3212,22 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                 this.cur = null;
             }
             // 진행 감시
+            // 날이 바뀌면 실패 기록 초기화 (닫혀 있던 곳이 열릴 수 있음)
+            if (PROF.dayVar) {
+                const day = $gameVariables.value(PROF.dayVar);
+                if (this.day !== undefined && day !== this.day) { this.bad = {}; this.recent = []; BotLog.add('NEW DAY ' + day + ' (실패 기록 초기화)'); }
+                this.day = day;
+            }
+            // 진행 감시: 행동을 한 뒤에만 비교 (기다리는 동안은 세지 않음)
             const sig = this.signature();
-            if (this.lastSig === sig) this.noProg++; else { this.noProg = 0; this.sleepFails = 0; }
+            if (this.acted) {
+                if (this.lastSig === sig) this.noProg++; else { this.noProg = 0; this.sleepFails = 0; }
+                this.acted = false;
+            }
             this.lastSig = sig;
-            if (Graphics.frameCount - this.lastSave > 60 * 60 * 2 || this.noProg === 0 && this.stats.actions % 5 === 0) this.save('정기');
+            // 진행이 생겼고 안전할 때(근처에 적 없음, 체력 여유) 저장 -> 게임 오버 복구 시 진행을 잃지 않음
+            const safe = !this.enemyClose(7) && !(PROF.botHeal && $gameVariables.value(PROF.botHeal.hpVar) <= PROF.botHeal.below);
+            if (safe && (sig !== this.savedSig || Graphics.frameCount - this.lastSave > 60 * 60 * 3)) { this.save(sig !== this.savedSig ? '진행' : '정기'); this.savedSig = sig; }
             let by, field, rec;
             try {
                 Index.build();
@@ -3157,24 +3235,33 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                 field = Runner.liveField(0, false, true, { traps: NavCfg.allowTraps });
                 rec = Recommender.build(by, field);
             } catch (e) { this.stop('추천 계산 오류: ' + e, true); return; }
-            let it = this.noProg >= 8 ? null : this.pickNext(rec, by);
-            if (this.noProg >= 8) BotLog.add('NO-PROGRESS 8회: 시간 넘기기 시도');
-            if (!it && PROF.botCombat && this.enemiesOnMap() > 0 && (this.huntWait = (this.huntWait || 0) + 1) <= 40) {
-                // 할 일이 없는데 적이 있음: 기다리며 사격 (적을 처치해야 열리는 장면)
-                if (this.huntWait % 10 === 1) BotLog.add('WAIT 적 ' + this.enemiesOnMap() + '마리, 사격하며 대기');
+            let it = null;
+            if (this.noProg >= 8) {
+                // 행동해도 변화가 없음: 시간을 넘겨 본다 (안 되면 다른 할 일)
+                BotLog.add('NO-PROGRESS ' + this.noProg + '회: 시간 넘기기 시도');
+                it = this.sleepItem(by);
+                if (it) { this.stats.sleeps++; if (it.timeKey) this.bad[it.timeKey] = (this.bad[it.timeKey] || 0) + 1; }
+                this.noProg = 0;
+            }
+            if (!it) it = this.pickNext(rec, by);
+            if (!it && PROF.botCombat && this.enemiesOnMap() > 0 && (this.huntWait = (this.huntWait || 0) + 1) <= 20) {
+                // 할 일이 없는데 적이 있음: 잠시 기다리며 사격 (적을 처치해야 열리는 장면)
+                if (this.huntWait === 1) BotLog.add('WAIT 적 ' + this.enemiesOnMap() + '마리, 사격하며 대기');
                 return;
             }
-            if (it) this.huntWait = 0;
+            if (it) { this.huntWait = 0; this.idleDays = 0; }
             if (!it) {
                 it = this.sleepItem(by);
-                if (it) { this.stats.sleeps++; this.noProg = 0; this.sleepFails++; }
-                if (!it || this.sleepFails > 3) { this.stop(it ? '시간을 넘겨도 진행이 없음' : '할 일을 찾지 못함', true); return; }
+                if (it) { this.stats.sleeps++; this.noProg = 0; this.sleepFails++; if (it.timeKey) this.bad[it.timeKey] = (this.bad[it.timeKey] || 0) + 1; }
+                this.idleDays = (this.idleDays || 0) + (it ? 1 : 0);
+                if (!it || this.sleepFails > 3 || this.idleDays > 16) { this.stop(!it ? '할 일을 찾지 못함' : this.idleDays > 16 ? '할 일 없이 시간만 보내는 중 (스토리 조건을 못 찾음)' : '시간을 넘겨도 진행이 없음', true); return; }
             }
             const k = this.keyOf(it);
             this.recent.push(k); if (this.recent.length > 12) this.recent.shift();
             this.stats.actions++;
             BotLog.add('DO #' + this.stats.actions + ' ' + it.label + ' @' + (Index.maps[it.map] ? Index.maps[it.map].name : it.map) + (it.evId ? ' ev' + it.evId : '') + ' (prio ' + it.prio + ', 진행 ' + sig + ')');
             this.cur = it;
+            this.acted = true;
             Runner.lastFail = false;
             if (!this.startItem(it, by, field)) { this.bad[k] = (this.bad[k] || 0) + 1; BotLog.add('PLAN-FAIL ' + it.label); this.cur = null; }
         },
@@ -3381,7 +3468,8 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
         // 말 걸기뿐 아니라 접촉/밟기로 시작된 이벤트도 기록 (반복 이벤트 무한 추천 방지)
         if (this._trigger <= 3 && $gameSystem) {
             $gameSystem._navTalked = $gameSystem._navTalked || {};
-            $gameSystem._navTalked[this._mapId + ':' + this._eventId + ':' + this._pageIndex] = true;
+            // 날짜 변수(프로필 dayVar)가 있으면 그날 기록 -> 다음 날에는 다시 '새 대화'
+            $gameSystem._navTalked[this._mapId + ':' + this._eventId + ':' + this._pageIndex] = PROF.dayVar ? 'd' + $gameVariables.value(PROF.dayVar) : true;
         }
     };
 
