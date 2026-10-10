@@ -456,7 +456,7 @@
                     break;
                 case 126: case 127: case 128:
                     if (p[1] === 0) { out.gain = true; if (out.gains.length < 8) out.gains.push(conds()); }
-                    if (cmd.code === 126 && p[1] === 0 && p[2] === 0 && out.gainIds.length < 12 && !out.gainIds.includes(p[0])) out.gainIds.push(p[0]);
+                    if (cmd.code === 126 && p[1] === 0 && p[2] === 0 && out.gainIds.length < 24 && !out.gainIds.includes(p[0])) out.gainIds.push(p[0]);
                     if (cmd.code === 126 && p[1] === 1 && p[2] === 0 && out.loseIds.length < 12) out.loseIds.push(p[0]);
                     effect(); // 획득이든 납품(소모)이든 진행 효과
                     break;
@@ -464,7 +464,7 @@
                     out.battle = true;
                     break;
                 case 129: // 파티원 추가 (동행)
-                    if (p[1] === 0 && !out.partyAdd[p[0]]) out.partyAdd[p[0]] = conds();
+                    if (p[1] === 0) { const l = out.partyAdd[p[0]] = out.partyAdd[p[0]] || []; if (l.length < 4) l.push(conds()); } // 갈래별 조건을 모두 보관
                     break;
                 case 121:
                     if (p[2] === 1) { out.swOff = out.swOff || []; for (let v = p[0]; v <= p[1] && out.swOff.length < 24; v++) if (!out.swOff.includes(v)) out.swOff.push(v); }
@@ -505,7 +505,11 @@
                     break;
                 case 205:
                     // 이 이벤트가 플레이어에게서 멀어지는 이동 = 밀어서 움직이는 물체 (석상/책장)
-                    if (depth === 0 && p[0] === 0 && p[1] && p[1].list && p[1].list.some(mc => mc.code === 11)) out.pushSelf = true;
+                    if (depth === 0 && p[0] === 0 && p[1] && p[1].list) {
+                        const cs = p[1].list.map(mc => mc.code), t = cs.indexOf(25);
+                        // '멀어지기' 또는 '플레이어 쪽 보기 -> 뒤로 이동'(상자 밀기)
+                        if (cs.includes(11) || (t >= 0 && cs.indexOf(13, t) > t)) out.pushSelf = true;
+                    }
                     // 플레이어 이동 루트로 순간이동시키는 장치 (전송 함정/텔레포터): 순 이동량을 기록
                     if (depth === 0 && p[0] === -1 && p[1] && p[1].list) {
                         // '앞으로/뒤로/회전'이 있는 경로(문 통과 연출 등)는 바라보는 방향에 따라 결과가 달라지므로 명령 그대로 기록
@@ -559,12 +563,13 @@
                         if (ce.shop && !out.shop) out.shop = { goods: ce.shop.goods, name: ce.shop.name, conds: c0.concat(ce.shop.conds) };
                         msgs += ce.msgs;
                         if (ce.gain) { out.gain = true; for (const g of (ce.gains || [])) if (out.gains.length < 8) out.gains.push(c0.concat(g)); }
+                        for (const g of (ce.gainIds || [])) if (out.gainIds.length < 24 && !out.gainIds.includes(g)) out.gainIds.push(g); // 공통 이벤트 안의 획득(무작위 전리품 목록 등)
                         if (ce.battle) out.battle = true;
                         if (ce.changes) out.changes = true;
                         if (ce.danger) out.danger = true;
                         for (const v of (ce.swOn || [])) if (out.swOn.length < 24 && !out.swOn.includes(v)) out.swOn.push(v);
                         for (const v in (ce.swCond || {})) if (!out.swCond[v]) out.swCond[v] = c0.concat(ce.swCond[v]);
-                        for (const a in (ce.partyAdd || {})) if (!out.partyAdd[a]) out.partyAdd[a] = c0.concat(ce.partyAdd[a]);
+                        for (const a in (ce.partyAdd || {})) { const l = out.partyAdd[a] = out.partyAdd[a] || []; for (const cs of ce.partyAdd[a]) if (l.length < 4) l.push(c0.concat(cs)); }
                         for (const q of (ce.quest || [])) if (out.quest.length < 12) out.quest.push({ op: q.op, q: q.q, o: q.o, conds: c0.concat(q.conds) });
                         for (const vo of (ce.vops || [])) if (out.vops.length < 16) out.vops.push({ v: vo.v, op: vo.op, val: vo.val, conds: c0.concat(vo.conds) });
                         for (const st of (ce.stock || [])) if (out.stock.length < 80) out.stock.push(st);
@@ -601,7 +606,7 @@
     }
     function scanCommon(id, depth) {
         if (ceCache[id]) return ceCache[id];
-        ceCache[id] = { transfers: [], shop: null, msgs: 0, gain: false, battle: false, vars: [], changes: false, recover: false, gains: [], danger: false, selVars: [], wanted: [], swOn: [], stock: [], quest: [], vops: [], swCond: {}, partyAdd: {} }; // 재귀 방지
+        ceCache[id] = { transfers: [], gainIds: [], shop: null, msgs: 0, gain: false, battle: false, vars: [], changes: false, recover: false, gains: [], danger: false, selVars: [], wanted: [], swOn: [], stock: [], quest: [], vops: [], swCond: {}, partyAdd: {} }; // 재귀 방지
         const ce = $dataCommonEvents[id];
         const r = ce ? scanList(ce.list, depth) : ceCache[id];
         if (ce && DANGER_CE_RE.test(ce.name || '')) r.danger = true;
@@ -722,7 +727,7 @@
             this.partySetters = {};
             for (const id in this.maps) for (const ev of this.maps[id].events) {
                 if (ev.template) continue;
-                ev.pages.forEach((pg, pi) => { for (const a in (pg.partyAdd || {})) (this.partySetters[a] = this.partySetters[a] || []).push({ map: Number(id), evId: ev.id, page: pi, conds: pg.partyAdd[a] }); });
+                ev.pages.forEach((pg, pi) => { for (const a in (pg.partyAdd || {})) for (const cs of pg.partyAdd[a]) (this.partySetters[a] = this.partySetters[a] || []).push({ map: Number(id), evId: ev.id, page: pi, conds: cs }); });
             }
             // 이벤트 페이지 출현 조건에 쓰이는 변수 = 스토리 진행 변수 (대화 단계 등)
             this.condVars = new Set();
@@ -2527,22 +2532,7 @@
                         if (Cond.all(r.conds, r.map, r.evId) === false) continue;
                         if (!byMap[r.map] && !items.some(i => i.quest === qkey)) {
                             // 목표 장소로 가는 길이 막힘: 막는 조건을 분석해서 선행 할 일로
-                            try {
-                                const bi = this.blockedInfo(r.map, byMap, true, r.evId);
-                                if (bi && bi.failed) {
-                                    const base = { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help: help + (bi.text ? ' / 막힌 곳: ' + bi.text : '') };
-                                    let got = 0;
-                                    const cnt = it => { got++; add(it); };
-                                    this.prereqItems(bi.failed, byMap, field, cnt, base);
-                                    // 같은 출입구의 다른 갈래(다른 페이지 조건)도 확인
-                                    if (!got && bi.leg) {
-                                        Index._ignoreConds = true;
-                                        let alts = [];
-                                        try { alts = Index.edgesOf(bi.leg.from, null).filter(e => e.to.map === bi.leg.to.map && e.failed && e.failed.length); } finally { Index._ignoreConds = false; }
-                                        for (const e of alts) { if (got) break; this.prereqItems(e.failed, byMap, field, cnt, base); }
-                                    }
-                                }
-                            } catch (e) { Index._ignoreConds = false; }
+                            this.blockedPrereq(r.map, r.evId, byMap, field, add, { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help });
                             continue;
                         }
                         if (raw.trigger <= 2) {
@@ -2554,7 +2544,11 @@
                         continue;
                     }
                     // 지금은 비활성 페이지: 출현 조건 스위치를 켜는 선행 이벤트 / 변수 조건이면 그 변수를 올리는 이벤트
-                    this.prereqItems(Index.pageCondFails(raw.cond, r.map, r.evId), byMap, field, add, { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help });
+                    const pbase = { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help };
+                    const before = this._added || 0;
+                    this.prereqItems(Index.pageCondFails(raw.cond, r.map, r.evId), byMap, field, add, pbase);
+                    // 선행 단계가 목표 장소 안에 있는데 그곳에 갈 수 없으면 길을 여는 것이 먼저
+                    if ((this._added || 0) === before && !byMap[r.map] && !items.some(i => i.quest === qkey)) this.blockedPrereq(r.map, r.evId, byMap, field, add, pbase);
                 }
             }
 
@@ -2856,7 +2850,7 @@
             const srcs = Index.itemSources(itemId).sort((a, b) => (a.kind === 'shop' ? 0 : 1) - (b.kind === 'shop' ? 0 : 1));
             for (const sc of srcs) {
                 const map = Index.maps[sc.map], ev = Index.findEvent(sc.map, sc.evId), raw = ev && ev.pages[sc.page];
-                if (!raw || raw.danger) continue;
+                if (!raw || raw.danger || isIgnored(ev)) continue;
                 if (Index.activePage(map, ev) === raw && byMap[sc.map]) {
                     const r = Planner.reach(sc.map, sc.evId, byMap, field);
                     if (r.ok) return { map: sc.map, evId: sc.evId, hops: r.hops, depth, choices: [] };
@@ -2869,6 +2863,25 @@
                 }
             }
             return null;
+        },
+
+        // 갈 수 없는 장소(이벤트)로 가는 길을 막은 조건 -> 선행 할 일 (같은 출입구의 다른 갈래도 확인)
+        blockedPrereq(mapId, evId, byMap, field, add, base) {
+            try {
+                const bi = this.blockedInfo(mapId, byMap, true, evId);
+                if (!bi || !bi.failed) return 0;
+                base = Object.assign({}, base, { help: (base.help || '') + (bi.text ? ' / 막힌 곳: ' + bi.text : '') });
+                let got = 0;
+                const cnt = it => { got++; add(it); };
+                this.prereqItems(bi.failed, byMap, field, cnt, base);
+                if (!got && bi.leg) {
+                    Index._ignoreConds = true;
+                    let alts = [];
+                    try { alts = Index.edgesOf(bi.leg.from, null).filter(e => e.to.map === bi.leg.to.map && e.failed && e.failed.length); } finally { Index._ignoreConds = false; }
+                    for (const e of alts) { if (got) break; this.prereqItems(e.failed, byMap, field, cnt, base); }
+                }
+                return got;
+            } catch (e) { Index._ignoreConds = false; return 0; }
         },
 
         // 막힌 조건 목록 -> 선행 할 일 (스위치: 켜는 이벤트, 변수: 올리는 이벤트, 동료: 파티에 넣는 이벤트)
@@ -3108,6 +3121,34 @@
         },
 
         // 조건을 무시하고 경로를 찾은 뒤, 지금 막혀 있는 첫 단계의 이유를 설명
+        // 출입구까지 가는 길을 막은 고정 물체 중, 치우면 길이 열리고 뒤 페이지(조건부)가 있는 것 -> 그 페이지 조건
+        gateConds(leg, start) {
+            const map = Index.maps[leg.from]; if (!map) return null;
+            const obst = Index.obstacles(leg.from);
+            const reach = o => Planner.spotDist(map, Planner.staticBfs(map, start.x, start.y, o), leg.ex, leg.ey, leg.prio, leg.hb) >= 0;
+            if (reach(obst)) return null;
+            for (const ev of map.events) {
+                const pg = Index.activePage(map, ev);
+                if (!pg || pg.prio !== 1) continue;
+                const pi = ev.pages.indexOf(pg);
+                let failed = null;
+                for (let j = ev.pages.length - 1; j > pi; j--) { const f = Index.pageCondFails(ev.pages[j].cond, leg.from, ev.id); if (f.length && f.length <= 2) { failed = f; break; } }
+                if (!failed) continue;
+                const o2 = new Set(obst); o2.stop = new Set(); for (const k of ['push', 'oneway']) if (obst[k]) o2[k] = obst[k]; // 문 앞 조사 지점(밟으면 시작)은 열린 뒤 사라지므로 통과로 봄
+                const tiles = hbTiles(ev.x, ev.y, pg.hb || ev.hb);
+                for (const [tx, ty] of tiles) o2.delete(ty * map.w + tx);
+                if (reach(o2)) return { failed, evId: ev.id, name: ev.name };
+                // 철책처럼 칸 자체는 못 지나가고 열린 뒤 이벤트가 반대편으로 옮겨 주는 경우: 맞은편 칸에서 확인
+                const d0 = Planner.staticBfs(map, start.x, start.y, o2);
+                for (const [tx, ty] of tiles) for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+                    const ax = tx + dx, ay = ty + dy, bx = tx - dx, by = ty - dy;
+                    if (ax < 0 || ay < 0 || bx < 0 || by < 0 || ax >= map.w || bx >= map.w || ay >= map.h || by >= map.h) continue;
+                    if (d0[ay * map.w + ax] < 0) continue;
+                    if (Planner.spotDist(map, Planner.staticBfs(map, bx, by, o2), leg.ex, leg.ey, leg.prio, leg.hb) >= 0) return { failed, evId: ev.id, name: ev.name };
+                }
+            }
+            return null;
+        },
         blockedReason(targetMap) { const r = this.blockedInfo(targetMap); return r ? r.text : ''; },
         blockedInfo(targetMap, byNormal, exact, targetEv) {
             Index._ignoreConds = true;
@@ -3129,7 +3170,9 @@
                 }
                 if (!exact) for (const m in by2) if (Index.rootId(Number(m)) === root && (!node || by2[m][0].cost < node.cost)) node = by2[m][0];
                 if (!node) return null;
-                for (const e of Planner.legsTo(node)) {
+                const legs = Planner.legsTo(node);
+                for (let li = 0; li < legs.length; li++) {
+                    const e = legs[li];
                     // 시간대 같은 상태 스위치로만 막힌 곳은 시간이 지나면 풀리므로 다음 원인을 봄
                     if (e.failed && e.failed.length && e.failed.every(c => c.k === 'if' && c.p[0] === 0 && Index.volatileSw && Index.volatileSw.has(c.p[1]))) continue;
                     if (e.failed && e.failed.length) {
@@ -3137,6 +3180,14 @@
                     }
                     // 조건은 맞지만 지금 위치 기준으로는 그 출입구까지 걸어서 못 가는 경우 (맵 안의 장애물)
                     if (byNormal && byNormal[e.from] && !byNormal[e.to.map] && e.kind === 'event') {
+                        // 길을 막은 물체(철책 등)가 나중 페이지에서 열리면 그 페이지 조건이 선행 조건
+                        // 실제로 들어갈 수 있는 지점(현재 조건) 기준으로 확인
+                        const starts = (byNormal[e.from] || []).map(n => n.s);
+                        if (e.from === $gameMap.mapId()) starts.unshift({ x: $gamePlayer.x, y: $gamePlayer.y });
+                        Index._ignoreConds = false;
+                        let gate = null;
+                        try { for (const st of starts) { gate = this.gateConds(e, st); if (gate) break; } } finally { Index._ignoreConds = true; }
+                        if (gate) return { leg: e, failed: gate.failed, stuck: true, gateEv: gate.evId, text: Index.maps[e.from].name + ' ' + (gate.name || '장애물') + ': ' + gate.failed.map(c => Index.describeCond(c)).join(', ') };
                         return { leg: e, failed: [], stuck: true, text: Index.maps[e.from].name + ' (' + e.ex + ',' + e.ey + ') 까지 가는 길이 막혀 있음' };
                     }
                 }
@@ -3229,8 +3280,40 @@
         keyOf(it) { return it.map + ':' + (it.evId || 0) + ':' + it.type + ':' + (it.label || ''); },
 
         // 다음에 할 일 고르기
+        // 생존 자원 (프로필 botFood: { items, need(), warnSwitch }): 밤마다 소비되는 식량이 모자라면 먼저 확보
+        foodShort() {
+            const F = PROF.botFood; if (!F || typeof $dataItems === 'undefined') return 0;
+            const have = F.items.reduce((s, i) => s + ($dataItems[i] ? $gameParty.numItems($dataItems[i]) : 0), 0);
+            const need = typeof F.need === 'function' ? F.need() : (F.need || 0);
+            return Math.max(0, need - have);
+        },
+        foodCritical() { const F = PROF.botFood; return !!(F && this.foodShort() > 0 && (!F.warnSwitch || $gameSwitches.value(F.warnSwitch))); },
+        // 이 항목이 시간을 넘기는 공통 이벤트(다음 날 등)를 부르는지
+        passesTime(it) {
+            const map = Index.maps[it.map], ev = map && it.evId && Index.findEvent(it.map, it.evId), pg = ev && Index.activePage(map, ev);
+            return !!(pg && (pg.ces || []).some(c => (PROF.botTimeCe || []).includes(c)));
+        },
+        foodItem(byMap) {
+            const F = PROF.botFood; if (!F) return null;
+            let best = null;
+            for (const id of F.items) for (const sc of Index.itemSources(id)) {
+                if (sc.kind === 'shop') continue; // 상점 구매는 자동 진행 대상 아님
+                const map = Index.maps[sc.map], ev = Index.findEvent(sc.map, sc.evId), raw = ev && ev.pages[sc.page];
+                if (!raw || raw.danger || isIgnored(ev) || !byMap[sc.map] || Index.activePage(map, ev) !== raw) continue;
+                if (PROF.botManualRe && PROF.botManualRe.test(ev.name || '')) continue;
+                if ((raw.ces || []).some(c => (PROF.botTimeCe || []).includes(c))) continue;
+                const it = { type: 'talk', map: sc.map, evId: sc.evId, label: '[봇] 식량 확보 (' + map.name + ' ' + (ev.name || '') + ')', prio: 0.5, choices: [] };
+                const k = this.keyOf(it);
+                if (this.bad[k] >= 2 || (this.badTotal || {})[k] >= 4) continue;
+                it.hops = sc.map === $gameMap.mapId() ? 0 : byMap[sc.map][0].hops;
+                if (!best || it.hops < best.hops) best = it;
+            }
+            return best;
+        },
+
         pickNext(rec, byMap) {
-            const ok = it => it && !(this.bad[this.keyOf(it)] >= 2) && !((this.badTotal || {})[this.keyOf(it)] >= 4) && !(PROF.botManualRe && (PROF.botManualRe.test(it.label || '') || PROF.botManualRe.test((Index.maps[it.map] || {}).name || '')));
+            const crit = this.foodCritical();
+            const ok = it => it && !(crit && this.passesTime(it)) && !(this.bad[this.keyOf(it)] >= 2) && !((this.badTotal || {})[this.keyOf(it)] >= 4) && !(PROF.botManualRe && (PROF.botManualRe.test(it.label || '') || PROF.botManualRe.test((Index.maps[it.map] || {}).name || '')));
             const cands = [];
             for (const u of (rec.units || [])) if (u.item) cands.push(u.item);
             if (rec.next) cands.push(rec.next);
@@ -3469,9 +3552,13 @@
             if (this.noProg >= 8) {
                 // 행동해도 변화가 없음: 시간을 넘겨 본다 (안 되면 다른 할 일)
                 BotLog.add('NO-PROGRESS ' + this.noProg + '회: 시간 넘기기 시도');
-                it = this.sleepItem(by);
+                it = this.foodCritical() ? null : this.sleepItem(by);
                 if (it) { this.stats.sleeps++; if (it.timeKey) this.bad[it.timeKey] = (this.bad[it.timeKey] || 0) + 1; }
                 this.noProg = 0;
+            }
+            if (!it && this.foodShort() > 0) {
+                it = this.foodItem(by);
+                if (it && this.lastFoodLog !== $gameVariables.value(PROF.dayVar || 0)) { this.lastFoodLog = $gameVariables.value(PROF.dayVar || 0); BotLog.add('FOOD 부족 ' + this.foodShort() + '개' + (this.foodCritical() ? ' (경고 상태: 이대로 자면 게임 오버)' : '')); }
             }
             if (!it) it = this.pickNext(rec, by);
             if (!it && PROF.botCombat && this.enemiesOnMap() > 0 && (this.huntWait = (this.huntWait || 0) + 1) <= 20) {
@@ -3481,6 +3568,7 @@
             }
             if (it) { this.huntWait = 0; this.idleDays = 0; }
             if (!it) {
+                if (this.foodCritical()) { this.stop('식량 부족: 지금 갈 수 있는 곳에서 식량을 구할 수 없음 (이대로 잠들면 게임 오버). 상점에서 식량을 사거나 정원/자원 부지를 확인하세요', true); return; }
                 it = this.sleepItem(by);
                 if (it) { this.stats.sleeps++; this.noProg = 0; this.sleepFails++; if (it.timeKey) this.bad[it.timeKey] = (this.bad[it.timeKey] || 0) + 1; }
                 this.idleDays = (this.idleDays || 0) + (it ? 1 : 0);

@@ -34,6 +34,13 @@
     botSleepChoiceRe: /잠자기|다음 날/,                 // 할 일이 없을 때 고를 '시간 넘기기' 선택지
     botTimeCe: [11, 6],                                   // 시간을 넘기는 공통 이벤트: 11 다음 날, 6 시간 경과(그리드 출구)
     botSleepEventRe: /^Sleep Icon$/,                      // 시간 넘기기 이벤트 이름 (자정에는 선택지가 '네'로 바뀜)
+    // 식량: 매일 밤 공통 이벤트 100이 인원(변수 15)과 스위치 21/22에 따라 식량을 소비. 모자라면 경고(스위치 25), 경고 상태에서 또 모자라면 게임 오버
+    botFood: {
+        items: [7, 8, 9, 13],
+        warnSwitch: 25,
+        need: () => { const n = $gameVariables.value(15), a = $gameSwitches.value(22), b = $gameSwitches.value(21);
+            const base = n >= 6 ? 5 : n >= 4 ? 4 : n >= 2 ? 3 : 2; return a ? base + 1 : b ? base - 1 : base; }
+    },
     botChoiceAvoid: /치트|cheat/i,                        // 봇이 절대 고르지 않을 선택지
     botManualRe: /보스|Boss|낚시|오토바이|콜로세움|바이올렛 컵|난투/, // 직접 해야 하는 장면(봇이 건너뜀)
     sideExcludeRe: /Zombie|Trap|Bomb|함정|폭탄/i,
