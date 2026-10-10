@@ -30,5 +30,25 @@
     // 지나가며 줍기에서 뺄 이벤트 이름
     sideExcludeRe: /bomb|trap|폭탄|함정/i,
     // 길을 막은 추격형 적에게 부딪혀서라도 지나갈지
-    enemyContact: false
+    enemyContact: false,
+    // 추천에서 뺄 이벤트 이름 (치트 일지, 디버그, 조명 처리, 미니게임 등)
+    ignoreEventRe: /Cheat|Debug|치트/i,
+    // 이동 명령 전에 대사가 이보다 많으면 스토리 장면으로 보고 경로에서 제외 (문 앞 대사가 긴 게임은 늘림)
+    maxStoryMessages: 2,
+
+    // ---- 진행 조건 분석 ----
+    ignoreSwitches: [],        // 시간대처럼 저절로 바뀌는 스위치 (막힌 이유 분석에서 제외)
+    ignoreVars: [],            // 진행과 무관한 변수
+    dayVar: 0,                 // 날짜 변수 (날이 바뀌면 대화했던 캐릭터와 다시 대화). 없으면 0
+
+    // ---- 자동 진행 봇 (없는 시스템은 지우거나 null) ----
+    botTextWait: 45,           // 대사 넘김 간격 (프레임, 60 = 1초)
+    botHeal: null,             // { hpVar, below: 숫자 또는 () => 숫자, items: [아이템ID] 또는 () => [...] }
+    botCombat: null,           // { key: 'pageup', range: 7, interval: 20, bulletSpeed: 0.25(칸/프레임), requireSwitches: [] }
+    botFood: null,             // { items: [식량 아이템], need: () => 오늘 밤 소비량, warnSwitch: 경고 스위치, buffer: 며칠 치 모을지 }
+    botSleepChoiceRe: null,    // 할 일이 없을 때 고를 '시간 넘기기' 선택지 문구 (/잠자기|다음 날/)
+    botSleepEventRe: null,     // 잠자기 이벤트 이름
+    botTimeCe: [],             // 시간을 넘기는 공통 이벤트 ID
+    botChoiceAvoid: /치트|cheat/i, // 봇이 절대 고르지 않을 선택지
+    botManualRe: /보스|Boss|낚시/  // 직접 해야 하는 장면 (이벤트/맵 이름)
 })

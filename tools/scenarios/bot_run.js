@@ -3,6 +3,7 @@
 const fs = require('fs'), path = require('path');
 module.exports = async (page, h) => {
   await h.wait(1500);
+  if (process.env.BOTSPEED) await page.evaluate(v => { ConfigManager.navBotSpeed = v; }, Number(process.env.BOTSPEED));
   await page.evaluate(() => ClaudeAutoNav.Bot.start());
   const end = Date.now() + Number(process.env.MINUTES || 5) * 60000;
   let last = '';

@@ -1,5 +1,7 @@
 # ClaudeAutoNav
 
+> 새로 작업을 이어받는 경우 `HANDOFF.md`(인계서)를 먼저 읽으세요.
+
 RPG Maker MV/MZ 게임용 자동 내비게이션 플러그인이에요. N 키로 메뉴를 열면 갈 수 있는 지역, 할 일 추천, 자동 이동, 아이템 줍기를 쓸 수 있어요.
 처음에는 Unholy Maiden(MZ)용으로 만들었고, v2.0부터 엔진(core)과 게임별 설정(profile)을 나눠서 다른 게임에도 적용할 수 있어요.
 
@@ -18,7 +20,7 @@ RPG Maker MV/MZ 게임용 자동 내비게이션 플러그인이에요. N 키로
 | 게임 | 엔진 | 프로필 | 최신 배포본 | 문서 |
 |---|---|---|---|---|
 | Unholy Maiden | MZ | `profiles/unholy_maiden.js` | `dist/unholy_maiden/ClaudeAutoNav_v50.js` | `games/unholy_maiden/HANDOFF.md` |
-| Zombie's Retreat 2 | MV | `profiles/zombies_retreat_2.js` | `dist/zombies_retreat_2/ClaudeAutoNav_v7.js` | `games/zombies_retreat_2/NOTES.md` |
+| Zombie's Retreat 2 | MV | `profiles/zombies_retreat_2.js` | `dist/zombies_retreat_2/ClaudeAutoNav_v12.js` | `games/zombies_retreat_2/NOTES.md` |
 
 ## 배포 방법
 
@@ -89,6 +91,10 @@ N 키 메뉴 맨 위의 `▶ 봇 자동 진행 시작`으로 켜고, 방향키/E
 
 | 도구 | 용도 |
 |---|---|
+| `tools/probe.js` | 추천/막힌 이유/경로/페이지/변수/아이템/동료/퀘스트 점검 (Node, 가장 먼저 쓰는 분석 도구) |
+| `tools/scenarios/bot_run.js` | 실제 엔진에서 봇을 N분 실행 (`BOTSPEED=10`으로 봇 배속) |
+| `tools/scenarios/trace.js` | 게임 오버/공통 이벤트/스위치 변화 추적 |
+| `tools/scenarios/goto.js` | 자동 이동 하나만 실행 |
 | `tools/harness.js` | RPG Maker 전역을 흉내 내고 플러그인을 로드 (Node) |
 | `tools/reach.js` | 지금 상태에서 갈 수 있는 지역과 경로 출력 |
 | `tools/sim.js` | 추천을 따라가는 가상 플레이 (막히는 곳 찾기) |

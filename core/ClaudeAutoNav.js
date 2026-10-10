@@ -2221,6 +2221,8 @@
                 onArrive();
                 return;
             }
+            // 봇: 이동 중에도 맞힐 수 있는 좀비가 있으면 멈춰서 먼저 쏨
+            if (Bot.active && Bot.combat(true)) return;
             const d = this.path.dirs[0];
             const bx = $gamePlayer.x, by = $gamePlayer.y;
             if (this.path.doors && this.path.doors.size) {
@@ -2440,9 +2442,13 @@
         c.navBotSpeed = this.navBotSpeed || 1;
         return c;
     };
+    if (Game_Map.prototype && Game_Map.prototype.update) {
+        const _gmu = Game_Map.prototype.update;
+        Game_Map.prototype.update = function() { this._navTick = (this._navTick || 0) + 1; return _gmu.apply(this, arguments); };
+    }
     // 봇 배속: 봇이 켜져 있을 때만 게임 시간을 빠르게 흐르게 함 (MV: 프레임 시간, MZ: 갱신 횟수)
     const navSpeed = () => (typeof Bot !== 'undefined' && Bot.active) ? NavCfg.botSpeed : 1;
-    if (SceneManager._getTimeInMsWithoutMobileSafari) {
+    if (typeof SceneManager !== "undefined" && SceneManager._getTimeInMsWithoutMobileSafari) {
         const _t = SceneManager._getTimeInMsWithoutMobileSafari;
         let lastReal = null, virt = 0;
         SceneManager._getTimeInMsWithoutMobileSafari = function() {
@@ -2452,7 +2458,7 @@
             return virt;
         };
     }
-    if (SceneManager.determineRepeatNumber) {
+    if (typeof SceneManager !== "undefined" && SceneManager.determineRepeatNumber) {
         const _drn = SceneManager.determineRepeatNumber;
         SceneManager.determineRepeatNumber = function(deltaTime) { return _drn.call(this, deltaTime * navSpeed()); };
     }
@@ -3516,12 +3522,12 @@
         },
 
         // 사격 전투 (프로필 botCombat): 같은 줄의 적을 향해 사격 키 입력
-        combat() {
+        combat(fromRunner) {
             const C = PROF.botCombat;
             if (!C) return false;
-            if (this._fireHold > 0 && --this._fireHold === 0) Input._currentState[C.key] = false;
+            if (!fromRunner) { if (this._fireHold > 0 && --this._fireHold === 0) Input._currentState[C.key] = false; this._fireCool = (this._fireCool || 0) - 1; }
             if ((C.requireSwitches || []).some(id => !$gameSwitches.value(id))) return false;
-            if ($gameMessage.isBusy() || $gamePlayer.isMoving() || (this._fireCool = (this._fireCool || 0) - 1) > 0) return false;
+            if ($gameMessage.isBusy() || $gamePlayer.isMoving() || this._fireCool > 0 || this._fireHold > 0) return false;
             const px = $gamePlayer.x, py = $gamePlayer.y, mapId = $gameMap.mapId(), R = C.range || 6;
             const bs = C.bulletSpeed || 0.25; // 총알 속도 (칸/프레임)
             let best = null;
@@ -3558,8 +3564,9 @@
         heal() {
             const H = PROF.botHeal;
             if (!H || $gameMap.isEventRunning() || $gameMessage.isBusy()) return false;
-            if ($gameVariables.value(H.hpVar) > H.below || (this._healCool = (this._healCool || 0) - 1) > 0) return false;
-            for (const id of H.items) {
+            const below = typeof H.below === 'function' ? H.below() : H.below, items = typeof H.items === 'function' ? H.items() : H.items;
+            if ($gameVariables.value(H.hpVar) > below || (this._healCool = (this._healCool || 0) - 1) > 0) return false;
+            for (const id of items) {
                 const it = $dataItems[id];
                 if (!it || !$gameParty.hasItem(it)) continue;
                 const ef = it.effects.find(e => e.code === 44);
@@ -3636,7 +3643,7 @@
             }
             this.lastSig = sig;
             // 진행이 생겼고 안전할 때(근처에 적 없음, 체력 여유) 저장 -> 게임 오버 복구 시 진행을 잃지 않음
-            const safe = !this.enemyClose(7) && !(PROF.botHeal && $gameVariables.value(PROF.botHeal.hpVar) <= PROF.botHeal.below);
+            const safe = !this.enemyClose(7) && !(PROF.botHeal && $gameVariables.value(PROF.botHeal.hpVar) <= 1);
             if (safe && (sig !== this.savedSig || Graphics.frameCount - this.lastSave > 60 * 60 * 3)) { this.save(sig !== this.savedSig ? '진행' : '정기'); this.savedSig = sig; }
             let by, field, rec;
             try {
@@ -3714,7 +3721,7 @@
         }
     };
 
-    window.ClaudeAutoNav = { Index, Planner, Runner, Recommender, Bot, BotLog };
+    window.ClaudeAutoNav = { Index, Planner, Runner, Recommender, Bot, BotLog, Cond };
 
     //=========================================================================
     // 게임 훅
@@ -3940,7 +3947,8 @@
         _Scene_Map_update.call(this);
         if (SceneManager._scene !== this) return;
         try {
-            if (Runner._frameStamp !== Graphics.frameCount) { Runner._frameStamp = Graphics.frameCount; Runner.update(); }
+            // 게임 갱신 1회마다 1번 (배속 시 화면 프레임보다 갱신이 많으므로 화면 프레임 기준이면 봇만 느려짐)
+            if (Runner._frameStamp !== $gameMap._navTick) { Runner._frameStamp = $gameMap._navTick; Runner.update(); }
         } catch (e) {
             // 자동 진행 중 예외가 나도 게임이 멈추지 않도록 중단만 하고 기록
             NavLog.add('ERROR ' + (e && e.stack ? e.stack.split('\n').slice(0, 3).join(' | ') : e));

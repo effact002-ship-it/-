@@ -2494,7 +2494,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
     };
     // 봇 배속: 봇이 켜져 있을 때만 게임 시간을 빠르게 흐르게 함 (MV: 프레임 시간, MZ: 갱신 횟수)
     const navSpeed = () => (typeof Bot !== 'undefined' && Bot.active) ? NavCfg.botSpeed : 1;
-    if (SceneManager._getTimeInMsWithoutMobileSafari) {
+    if (typeof SceneManager !== "undefined" && SceneManager._getTimeInMsWithoutMobileSafari) {
         const _t = SceneManager._getTimeInMsWithoutMobileSafari;
         let lastReal = null, virt = 0;
         SceneManager._getTimeInMsWithoutMobileSafari = function() {
@@ -2504,7 +2504,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             return virt;
         };
     }
-    if (SceneManager.determineRepeatNumber) {
+    if (typeof SceneManager !== "undefined" && SceneManager.determineRepeatNumber) {
         const _drn = SceneManager.determineRepeatNumber;
         SceneManager.determineRepeatNumber = function(deltaTime) { return _drn.call(this, deltaTime * navSpeed()); };
     }
@@ -3766,7 +3766,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
         }
     };
 
-    window.ClaudeAutoNav = { Index, Planner, Runner, Recommender, Bot, BotLog };
+    window.ClaudeAutoNav = { Index, Planner, Runner, Recommender, Bot, BotLog, Cond };
 
     //=========================================================================
     // 게임 훅

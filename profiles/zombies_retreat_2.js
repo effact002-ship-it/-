@@ -29,7 +29,8 @@
     ignoreSwitches: [1, 2, 3, 4, 5, 12],                  // 시간대 스위치(아침~자정): 진행 조건 역추적에서 제외 (시간이 지나면 바뀜)
     dayVar: 1,                                            // 날짜 변수: 날이 바뀌면 대화했던 캐릭터와 다시 대화 (대화 단계 변수로 스토리 진행)
     // 봇 설정
-    botHeal: { hpVar: 18, below: 1, items: [12, 5] },     // HP(변수 18)가 1 이하면 구급상자 -> 약초
+    // HP(변수 18, 최대 변수 19): 1칸 깎이면 약초(+1), 1만 남으면 구급상자(완전 회복)
+    botHeal: { hpVar: 18, below: () => Math.max(1, $gameVariables.value(19) - 1), items: () => $gameVariables.value(18) <= 1 ? [12, 5] : [5] },
     botCombat: { key: 'pageup', range: 7, interval: 20, bulletSpeed: 0.25, requireSwitches: [40] }, // 무기 장착(스위치 40) 상태에서 PageUp = 사격
     botSleepChoiceRe: /잠자기|다음 날/,                 // 할 일이 없을 때 고를 '시간 넘기기' 선택지
     botTimeCe: [11, 6],                                   // 시간을 넘기는 공통 이벤트: 11 다음 날, 6 시간 경과(그리드 출구)
