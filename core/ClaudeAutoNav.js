@@ -2208,6 +2208,13 @@
                 this.path = r; this.targetPos = { x: ge.x, y: ge.y };
             }
             if (this.path.dirs.length === 0) {
+                // 봇: 조사/수집을 시작하기 전에 쫓아오는 좀비가 있으면 먼저 처치 (사격하며 최대 10초 대기)
+                if (Bot.active && PROF.botCombat && Bot.threatNear(PROF.botCombat.range || 7) && (this._huntWait = (this._huntWait || 0) + 1) < 600) {
+                    if (this._huntWait === 1) BotLog.add('HUNT 상호작용 전에 근처 좀비 처치');
+                    this.path = null;
+                    return;
+                }
+                this._huntWait = 0;
                 const face = this.path.spot.face;
                 if (face) $gamePlayer.setDirection(face);
                 this.path = null; this._blocked = null;
@@ -3496,27 +3503,35 @@
             if ((C.requireSwitches || []).some(id => !$gameSwitches.value(id))) return false;
             if ($gameMessage.isBusy() || $gamePlayer.isMoving() || (this._fireCool = (this._fireCool || 0) - 1) > 0) return false;
             const px = $gamePlayer.x, py = $gamePlayer.y, mapId = $gameMap.mapId(), R = C.range || 6;
+            const bs = C.bulletSpeed || 0.25; // 총알 속도 (칸/프레임)
             let best = null;
             for (const ge of $gameMap.events()) {
                 if (ge._erased || !ge.page()) continue;
                 const fe = Index.findEvent(mapId, ge.eventId()), pg = fe && fe.pages[ge._pageIndex];
                 if (!pg || !pg.enemy) continue;
-                const dx = ge.x - px, dy = ge.y - py;
-                if ((dx && dy) || (!dx && !dy) || Math.abs(dx) + Math.abs(dy) > R) continue;
-                const d = dx > 0 ? 6 : dx < 0 ? 4 : dy > 0 ? 2 : 8;
-                // 사이에 막힌 칸이 없어야 함
-                let x = px, y = py, clear = true;
-                while (x !== ge.x || y !== ge.y) {
-                    if (!$gameMap.isPassable(x, y, d)) { clear = false; break; }
-                    x += DX[d]; y += DY[d];
+                // 좀비가 움직이는 중이면 총알이 닿을 때의 위치를 예측해서 그 줄로 쏨
+                const mv = ge.isMoving(), sp = mv ? ge.distancePerFrame() : 0, md = ge.direction();
+                const vx = mv ? DX[md] * sp : 0, vy = mv ? DY[md] * sp : 0;
+                for (const d of [2, 4, 6, 8]) {
+                    const horiz = d === 4 || d === 6, sg = (d === 6 || d === 2) ? 1 : -1;
+                    const along0 = horiz ? (ge._realX - px) * sg : (ge._realY - py) * sg;
+                    if (along0 < 0.3) continue;
+                    const vAlong = horiz ? vx * sg : vy * sg, vLat = horiz ? vy : vx;
+                    const t = along0 / Math.max(0.05, bs - vAlong); // 마주 오면 더 빨리 닿음
+                    const along = along0 + vAlong * t, lat = (horiz ? ge._realY - py : ge._realX - px) + vLat * t;
+                    if (Math.abs(lat) > 0.45 || along > R + 0.3) continue;
+                    // 사이에 막힌 칸이 없어야 함
+                    const n = Math.round(along);
+                    let x = px, y = py, clear = true;
+                    for (let i = 0; i < n; i++) { if (!$gameMap.isPassable(x, y, d)) { clear = false; break; } x += DX[d]; y += DY[d]; }
+                    if (clear && (!best || along < best.dist)) best = { d, dist: Math.round(along * 10) / 10, id: ge.eventId(), lead: mv && Math.abs(vLat) > 0 };
                 }
-                if (clear && (!best || Math.abs(dx) + Math.abs(dy) < best.dist)) best = { d, dist: Math.abs(dx) + Math.abs(dy), id: ge.eventId() };
             }
             if (!best) return false;
             $gamePlayer.setDirection(best.d);
             Input._currentState[C.key] = true;
             this._fireHold = 2; this._fireCool = C.interval || 20;
-            if (!this._lastFireLog || Graphics.frameCount - this._lastFireLog > 120) { BotLog.add('FIRE ev' + best.id + ' (거리 ' + best.dist + ')'); this._lastFireLog = Graphics.frameCount; }
+            if (!this._lastFireLog || Graphics.frameCount - this._lastFireLog > 120) { BotLog.add('FIRE ev' + best.id + ' (거리 ' + best.dist + (best.lead ? ', 이동 예측' : '') + ')'); this._lastFireLog = Graphics.frameCount; }
             return true;
         },
         // 회복 (프로필 botHeal: { hpVar, below, items }): 체력 변수가 낮으면 회복 아이템 사용
@@ -3539,6 +3554,17 @@
         enemyClose(r) {
             const mapId = $gameMap.mapId(), px = $gamePlayer.x, py = $gamePlayer.y;
             return $gameMap.events().some(ge => { if (ge._erased || !ge.page() || Math.abs(ge.x - px) + Math.abs(ge.y - py) > r) return false; const fe = Index.findEvent(mapId, ge.eventId()), pg = fe && fe.pages[ge._pageIndex]; return pg && pg.enemy; });
+        },
+        // 나를 쫓는 중이거나 아주 가까운 좀비 (YEP_EventChasePlayer의 추격 상태)
+        threatNear(r) {
+            const mapId = $gameMap.mapId(), px = $gamePlayer.x, py = $gamePlayer.y;
+            return $gameMap.events().some(ge => {
+                if (ge._erased || !ge.page()) return false;
+                const fe = Index.findEvent(mapId, ge.eventId()), pg = fe && fe.pages[ge._pageIndex];
+                if (!pg || !pg.enemy) return false;
+                const d = Math.abs(ge.x - px) + Math.abs(ge.y - py);
+                return (ge._chasePlayer && d <= r) || d <= 3;
+            });
         },
         enemiesOnMap() {
             const mapId = $gameMap.mapId();

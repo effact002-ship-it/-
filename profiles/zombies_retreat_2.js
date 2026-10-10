@@ -25,12 +25,12 @@
     ],
     talkWithoutName: true,
     // 추천에서 뺄 이벤트: 치트 일지, 업데이트/조명 처리, 미니게임(낚시)
-    ignoreEventRe: /^Journal$|Cheat|Debug|Updater|Lighting|^Light$|Fishing/i,
+    ignoreEventRe: /^Journal$|Cheat|Debug|Updater|Lighting|^Light$|Fishing|Crane|Z-Cola/i,
     ignoreSwitches: [1, 2, 3, 4, 5, 12],                  // 시간대 스위치(아침~자정): 진행 조건 역추적에서 제외 (시간이 지나면 바뀜)
     dayVar: 1,                                            // 날짜 변수: 날이 바뀌면 대화했던 캐릭터와 다시 대화 (대화 단계 변수로 스토리 진행)
     // 봇 설정
     botHeal: { hpVar: 18, below: 1, items: [12, 5] },     // HP(변수 18)가 1 이하면 구급상자 -> 약초
-    botCombat: { key: 'pageup', range: 7, interval: 20, requireSwitches: [40] }, // 무기 장착(스위치 40) 상태에서 PageUp = 사격
+    botCombat: { key: 'pageup', range: 7, interval: 20, bulletSpeed: 0.25, requireSwitches: [40] }, // 무기 장착(스위치 40) 상태에서 PageUp = 사격
     botSleepChoiceRe: /잠자기|다음 날/,                 // 할 일이 없을 때 고를 '시간 넘기기' 선택지
     botTimeCe: [11, 6],                                   // 시간을 넘기는 공통 이벤트: 11 다음 날, 6 시간 경과(그리드 출구)
     botSleepEventRe: /^Sleep Icon$/,                      // 시간 넘기기 이벤트 이름 (자정에는 선택지가 '네'로 바뀜)
@@ -43,7 +43,7 @@
             const base = n >= 6 ? 5 : n >= 4 ? 4 : n >= 2 ? 3 : 2; return a ? base + 1 : b ? base - 1 : base; }
     },
     botChoiceAvoid: /치트|cheat/i,                        // 봇이 절대 고르지 않을 선택지
-    botManualRe: /보스|Boss|낚시|오토바이|콜로세움|바이올렛 컵|난투/, // 직접 해야 하는 장면(봇이 건너뜀)
+    botManualRe: /보스|Boss|낚시|오토바이|콜로세움|바이올렛 컵|난투|Crane|크레인|Z-Cola/, // 직접 해야 하는 장면(봇이 건너뜀)
     sideExcludeRe: /Zombie|Trap|Bomb|함정|폭탄/i,
     enemyContact: false
 })
