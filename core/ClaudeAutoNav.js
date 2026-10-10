@@ -3581,7 +3581,11 @@
             // 진행 감시: 행동을 한 뒤에만 비교 (기다리는 동안은 세지 않음)
             const sig = this.signature();
             if (this.acted) {
-                if (this.lastSig === sig) this.noProg++; else { this.noProg = 0; this.sleepFails = 0; }
+                if (this.lastSig === sig) {
+                    this.noProg++;
+                    // 끝까지 해도 아무 변화가 없는 대상은 그날 두 번이면 제외 (왔다 갔다 반복 방지)
+                    if (this.lastKey) { this.bad[this.lastKey] = (this.bad[this.lastKey] || 0) + 1; if (this.bad[this.lastKey] >= 2) BotLog.add('NO-EFFECT ' + this.lastKey + ' (오늘은 제외)'); }
+                } else { this.noProg = 0; this.sleepFails = 0; }
                 this.acted = false;
             }
             this.lastSig = sig;
@@ -3624,6 +3628,7 @@
                 if (!it || this.sleepFails > 3 || this.idleDays > 16) { this.stop(!it ? '할 일을 찾지 못함' : this.idleDays > 16 ? '할 일 없이 시간만 보내는 중 (스토리 조건을 못 찾음)' : '시간을 넘겨도 진행이 없음', true); return; }
             }
             const k = this.keyOf(it);
+            this.lastKey = it.timeKey || it.sleep ? null : k;
             this.recent.push(k); if (this.recent.length > 12) this.recent.shift();
             this.stats.actions++;
             if (this.lastCands && this.lastCands.length) BotLog.add('  후보: ' + this.lastCands.join(' | '));
