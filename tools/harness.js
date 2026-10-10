@@ -34,7 +34,7 @@ function load(opt) {
     global.Window_Command = class {}; global.Window_Base = class {}; global.Scene_MenuBase = class {};
     global.process.mainModule = { filename: path.join(G, 'index.html') };
     global.$dataMapInfos = ld('MapInfos.json'); global.$dataTilesets = ld('Tilesets.json'); global.$dataCommonEvents = ld('CommonEvents.json');
-    global.$dataItems = ld('Items.json'); global.$dataWeapons = ld('Weapons.json'); global.$dataArmors = ld('Armors.json'); global.$dataActors = ld('Actors.json');
+    global.$dataItems = ld('Items.json'); global.$dataWeapons = ld('Weapons.json'); global.$dataArmors = ld('Armors.json'); global.$dataActors = ld("Actors.json"); global.$dataSystem = ld("System.json");
     if (opt.templateMap) global.$dataTemplateEvents = ld('Map' + String(opt.templateMap).padStart(3, '0') + '.json').events;
 
     global.$gameSwitches = { value: i => S.sw.has(i) };

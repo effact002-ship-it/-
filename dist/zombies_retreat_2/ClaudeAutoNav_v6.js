@@ -790,7 +790,11 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             const offCnt = {};
             for (const id in this.maps) for (const ev of this.maps[id].events) for (const pg of ev.pages) for (const v of (pg.swOff || [])) offCnt[v] = (offCnt[v] || 0) + 1;
             for (const ce of $dataCommonEvents) if (ce) for (const c of ce.list || []) if (c.code === 121 && c.parameters[2] === 1) for (let v = c.parameters[0]; v <= c.parameters[1]; v++) offCnt[v] = (offCnt[v] || 0) + 1;
-            for (const v in offCnt) if (offCnt[v] >= 3) this.volatileSw.add(Number(v));
+            // 켜는 곳도 끄는 곳도 여러 군데인 스위치만 상태 스위치 (한 번 켜고 장면 뒤에 끄는 '계기 스위치'는 제외)
+            const onCnt = {};
+            for (const id in this.maps) for (const ev of this.maps[id].events) for (const pg of ev.pages) for (const v of (pg.swOn || [])) onCnt[v] = (onCnt[v] || 0) + 1;
+            for (const ce of $dataCommonEvents) if (ce) for (const c of ce.list || []) if (c.code === 121 && c.parameters[2] === 0) for (let v = c.parameters[0]; v <= c.parameters[1]; v++) onCnt[v] = (onCnt[v] || 0) + 1;
+            for (const v in offCnt) if (offCnt[v] >= 3 && (onCnt[v] || 0) >= 3) this.volatileSw.add(Number(v));
             for (const id in this.maps) {
                 for (const ev of this.maps[id].events) {
                     ev.pages.forEach((pg, pi) => {
@@ -2473,7 +2477,16 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             const add = (c, by, fld) => {
                 const k = c.map + ':' + c.evId;
                 if (Runner.badTargets.has(k)) return;
-                if (seen.has(k)) { const o = items.find(x => x.map === c.map && x.evId === c.evId); if (o && c.prio < o.prio) Object.assign(o, c); return; }
+                if (seen.has(k)) {
+                    const o = items.find(x => x.map === c.map && x.evId === c.evId);
+                    if (!o) return;
+                    // 같은 대상: 더 중요한 쪽을 쓰되, 진행에 필요한 선택지 정보는 살림
+                    const hasCh = c.choices && c.choices.length, oldCh = o.choices && o.choices.length;
+                    if (c.prio < o.prio) Object.assign(o, c);
+                    else if (hasCh && !oldCh) { o.choices = c.choices; o.label = c.label; o.help = c.help; o.prio = Math.min(o.prio, c.prio); }
+                    o._merged = true;
+                    return;
+                }
                 const r = Planner.reach(c.map, c.evId, by || byMap, fld || field);
                 if (!r.ok) return;
                 c.hops = r.hops; seen.add(k); items.push(c);
@@ -2566,6 +2579,34 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                     }
                     // 지금은 비활성 페이지: 출현 조건 스위치를 켜는 선행 이벤트 / 변수 조건이면 그 변수를 올리는 이벤트
                     this.prereqItems(Index.pageCondFails(raw.cond, r.map, r.evId), byMap, field, add, { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help });
+                }
+            }
+
+            // 스토리 진행 조건: 대사가 많은 장면이 '변수 >= N' 하나로만 막혀 있으면, 그 변수를 올리는 방법을 추천 (가까운 단계 3개)
+            if (Index.condVars) {
+                const front = new Map();
+                for (const m in Index.maps) for (const ev of Index.maps[m].events) {
+                    if (ev.template || isIgnored(ev)) continue;
+                    for (const pg of ev.pages) {
+                        const c = pg.cond;
+                        if (pg.dmsgs < 5 || pg.danger || !c.variableValid || !Index.condVars.has(c.variableId)) continue;
+                        const cur = $gameVariables.value(c.variableId);
+                        if (cur >= c.variableValue) continue;
+                        const fails = Index.pageCondFails(c, Number(m), ev.id);
+                        if (fails.length !== 1) continue;
+                        const gap = c.variableValue - cur, old = front.get(c.variableId);
+                        if (!old || gap < old) front.set(c.variableId, gap);
+                    }
+                }
+                const sysVars = typeof $dataSystem !== 'undefined' && $dataSystem ? $dataSystem.variables : [];
+                // 올릴 방법이 실제로 있는 변수를 3개까지 (부족한 양이 적은 순으로 최대 15개 확인)
+                let found = 0;
+                for (const [v] of [...front.entries()].sort((a, b) => a[1] - b[1]).slice(0, 15)) {
+                    if (found >= 3) break;
+                    const vn = String((sysVars && sysVars[v]) || ('변수 ' + v)).replace(/:$/, '');
+                    let got = 0;
+                    this.varPrereq(v, byMap, field, it => { got++; add(it); }, { cat: '이벤트', prio: 2.3, label: '[스토리] ' + vn + ' 올리기', help: '다음 장면을 열려면 ' + vn + '이(가) 더 필요합니다.' });
+                    if (got) found++;
                 }
             }
 
@@ -2855,13 +2896,14 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
         },
 
         // 막힌 조건 목록 -> 선행 할 일 (스위치: 켜는 이벤트, 변수: 올리는 이벤트, 동료: 파티에 넣는 이벤트)
-        prereqItems(fails, byMap, field, add, base) {
+        prereqItems(fails, byMap, field, add, base, depth) {
+            const add0 = add; add = it => { this._added = (this._added || 0) + 1; add0(it); };
             for (const c of fails || []) {
                 if (c.k !== 'if') continue;
                 if ((c.p[0] === 0 && c.p[2] === 0 && !c.neg) || (c.p[0] === 8 && !c.neg)) {
                     const g = c.p[0] === 0 ? this.findSetter(c.p[1], byMap, field, 1) : this.findItem(c.p[1], byMap, field, 1);
                     if (g) add(Object.assign({ type: 'talk', map: g.map, evId: g.evId, choices: g.choices || [], synth: g.synth || 0 }, base, g.synth ? { label: base.label.replace('(선행 단계)', '(' + (($dataItems[g.synth] || {}).name || '아이템') + ' 제작)') } : {}));
-                } else if (c.p[0] === 1) this.varPrereq(c.p[1], byMap, field, add, base);
+                } else if (c.p[0] === 1) this.varPrereq(c.p[1], byMap, field, add, base, depth || 0);
                 else if (c.p[0] === 4 && !c.neg) {
                     for (const st of (Index.partySetters[c.p[1]] || [])) {
                         const map = Index.maps[st.map], ev = Index.findEvent(st.map, st.evId), raw = ev && ev.pages[st.page];
@@ -2875,14 +2917,27 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
         },
 
         // 변수 v를 올리는 이벤트 중 지금 할 수 있는 것을 추천 (최대 2개, 그 이벤트의 선택지 포함)
-        varPrereq(v, byMap, field, add, base) {
-            if (Index.varItem && Index.varItem[v]) return;
+        varPrereq(v, byMap, field, add, base, depth) {
+            depth = depth || 0;
+            if ((Index.varItem && Index.varItem[v]) || depth > 2) return;
             let n = 0;
             for (const st of (Index.varSetters[v] || [])) {
                 if (n >= 2) break;
                 const map = Index.maps[st.map], ev = Index.findEvent(st.map, st.evId);
                 const raw = ev && ev.pages[st.page];
-                if (!raw || raw.danger || raw.trigger > 2 || !byMap[st.map] || Index.activePage(map, ev) !== raw) continue;
+                if (!raw || raw.danger || !byMap[st.map]) continue;
+                if (Index.activePage(map, ev) !== raw) {
+                    // 지금은 닫힌 장면: 그 장면을 여는 조건(스위치/아이템/동료)을 거슬러 올라감
+                    const fails = Index.pageCondFails(raw.cond, st.map, st.evId);
+                    if (fails.length && fails.length <= 2 && !fails.some(c => c.k === 'if' && c.p[0] === 1 && c.p[1] === v)) {
+                        const before = this._added || 0;
+                        this.prereqItems(fails, byMap, field, add, base, depth + 1);
+                        if ((this._added || 0) > before) n++;
+                    }
+                    continue;
+                }
+                if (raw.trigger === 3) continue;
+                if (raw.trigger > 2) continue;
                 // 그 이벤트 안에서 지금 조건이 맞는 분기
                 const cl = st.condsList.find(cs => Cond.all(cs.filter(c => !isChoiceCond(c)), st.map, st.evId) !== false);
                 if (!cl) continue;
