@@ -2609,7 +2609,9 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                     }
                     // 조사 지점: 조사/접촉하면 스위치·셀프 스위치가 바뀌는 이벤트. 그 결과로 컷신/획득/이동이 열리면 중요
                     const realSw = pg.swOn.filter(v => !(Index.volatileSw && Index.volatileSw.has(v)));
-                    if (!done && pg.n > 1 && (pg.ssOn.length || realSw.length) && !pg.transfers.length && !pg.battle && !pg.enemy && !(pg.pmoves && pg.pmoves.length)) {
+                    // 조사 지점은 날이 바뀌어도 다시 하지 않음 (같은 페이지인 동안)
+                    const everDone = !!talkedRaw[mid + ':' + ev.id + ':' + pidx];
+                    if (!everDone && pg.n > 1 && (pg.ssOn.length || realSw.length) && !pg.transfers.length && !pg.battle && !pg.enemy && !(pg.pmoves && pg.pmoves.length)) {
                         const nextPg = ev.pages.find(p2 => p2 !== pg && ((p2.cond.selfSwitchValid && pg.ssOn.includes(p2.cond.selfSwitchCh)) ||
                             (p2.cond.switch1Valid && pg.swOn.includes(p2.cond.switch1Id))));
                         const strong = !!nextPg && (nextPg.trigger === 3 || nextPg.gain || nextPg.dmsgs >= 3 || nextPg.transfers.length > 0);
