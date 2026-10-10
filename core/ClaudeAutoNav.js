@@ -1618,6 +1618,7 @@
             this.lines.push(t + pos + ' ' + msg);
             if (this.lines.length > 300) this.lines.shift();
             this.dirty = true; // 파일 쓰기는 모아서 (이동 중 끊김 방지)
+            if (typeof window !== 'undefined') window.__navlog = this.lines;
         },
         tick() { if (this.dirty && (Graphics.frameCount % 60 === 0 || !Runner.active)) { this.dirty = false; this.flush(); } },
         flush() {

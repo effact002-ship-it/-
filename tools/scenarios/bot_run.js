@@ -14,8 +14,9 @@ module.exports = async (page, h) => {
     last = line;
     if (!st.bot) break;
   }
-  const out = await page.evaluate(() => ({ log: (window.__botlog || []).join('\n'), report: window.__botreport || '',
+  const out = await page.evaluate(() => ({ log: (window.__botlog || []).join('\n'), report: window.__botreport || '', navlog: (window.__navlog || []).join('\n'),
     save: (() => { try { return LZString.compressToBase64(JsonEx.stringify(DataManager.makeSaveContents())); } catch (e) { return ''; } })() }));
+  fs.writeFileSync(path.join(process.env.OUT || '.', 'nav_log.txt'), out.navlog || '');
   if (out.save) fs.writeFileSync(path.join(process.env.OUT || '.', 'bot_end.rpgsave'), out.save);
   const dir = process.env.OUT || '.';
   fs.writeFileSync(path.join(dir, 'bot_log.txt'), out.log);
