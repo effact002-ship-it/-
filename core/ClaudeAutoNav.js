@@ -22,8 +22,8 @@
  * @param maxStoryMessages
  * @text 이동 이벤트 허용 대화 수
  * @type number
- * @default 2
- * @desc 이동 명령 전에 대화가 이보다 많으면 스토리 이벤트로 보고 경로에서 제외
+ * @default
+ * @desc 이동 명령 전에 대화가 이보다 많으면 스토리 이벤트로 보고 경로에서 제외. 비워 두면 게임 프로필 값 (기본 2)
  *
  * @param travelItemPattern
  * @text 이동용 아이템 이름 패턴
@@ -99,7 +99,7 @@
     const OPEN_KEY = Number(P.openKey || 78);
     const EXCL_RE = new RegExp(P.excludeMapPattern || PROF.excludeMapPattern, 'i');
     const EXCL_IDS = P.excludeMapIds ? numList(P.excludeMapIds) : (PROF.excludeMapIds || []);
-    const MAX_MSG = Number(P.maxStoryMessages || 2);
+    const MAX_MSG = Number(P.maxStoryMessages || PROF.maxStoryMessages || 2);
     const ITEM_RE = new RegExp(P.travelItemPattern || PROF.travelItemPattern);
 
     Input.keyMapper[OPEN_KEY] = 'autonav';
@@ -2527,7 +2527,22 @@
                         if (Cond.all(r.conds, r.map, r.evId) === false) continue;
                         if (!byMap[r.map] && !items.some(i => i.quest === qkey)) {
                             // 목표 장소로 가는 길이 막힘: 막는 조건을 분석해서 선행 할 일로
-                            try { const bi = this.blockedInfo(r.map, byMap, true, r.evId); if (bi && bi.failed) this.prereqItems(bi.failed, byMap, field, add, { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help: help + (bi.text ? ' / 막힌 곳: ' + bi.text : '') }); } catch (e) { /* 무시 */ }
+                            try {
+                                const bi = this.blockedInfo(r.map, byMap, true, r.evId);
+                                if (bi && bi.failed) {
+                                    const base = { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help: help + (bi.text ? ' / 막힌 곳: ' + bi.text : '') };
+                                    let got = 0;
+                                    const cnt = it => { got++; add(it); };
+                                    this.prereqItems(bi.failed, byMap, field, cnt, base);
+                                    // 같은 출입구의 다른 갈래(다른 페이지 조건)도 확인
+                                    if (!got && bi.leg) {
+                                        Index._ignoreConds = true;
+                                        let alts = [];
+                                        try { alts = Index.edgesOf(bi.leg.from, null).filter(e => e.to.map === bi.leg.to.map && e.failed && e.failed.length); } finally { Index._ignoreConds = false; }
+                                        for (const e of alts) { if (got) break; this.prereqItems(e.failed, byMap, field, cnt, base); }
+                                    }
+                                }
+                            } catch (e) { Index._ignoreConds = false; }
                             continue;
                         }
                         if (raw.trigger <= 2) {
@@ -3418,7 +3433,12 @@
             // 직전 실행 결과
             if (this.cur) {
                 const k = this.keyOf(this.cur);
-                if (Runner.lastFail) { this.bad[k] = (this.bad[k] || 0) + 1; this.badTotal = this.badTotal || {}; this.badTotal[k] = (this.badTotal[k] || 0) + 1; BotLog.add('FAIL ' + this.cur.label + ' : ' + Runner.status); }
+                if (Runner.lastFail) {
+                    // 시간 초과/길 막힘은 오래 걸리고 다시 해도 같으므로 크게 감점
+                    const heavy = /시간 초과|길이 막힘/.test(Runner.status || '');
+                    this.bad[k] = (this.bad[k] || 0) + (heavy ? 2 : 1); this.badTotal = this.badTotal || {}; this.badTotal[k] = (this.badTotal[k] || 0) + (heavy ? 2 : 1);
+                    BotLog.add('FAIL ' + this.cur.label + ' : ' + Runner.status);
+                }
                 this.cur = null;
             }
             // 진행 감시

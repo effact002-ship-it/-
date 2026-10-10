@@ -9,6 +9,7 @@
     excludeMapPattern: '컷신|미사용|구버전|원본 백업|테스트|회상|크레딧|장면|^MAP\\d+$|cutscene|test|unused',
     endingRootIds: [240],
     travelItemPattern: '(?!)',
+    maxStoryMessages: 6,                                  // 문 열기 전에 대사가 몇 줄 나오는 출입구도 경로로 사용 (201호 등)
     hPictureRe: /Sex|HJ|BJ|FJ|TF\d|Paizuri|Thigh|Massage|Fondle/,
     floorRe: null,
     placeRules: [
