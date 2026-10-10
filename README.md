@@ -18,7 +18,7 @@ RPG Maker MV/MZ 게임용 자동 내비게이션 플러그인이에요. N 키로
 | 게임 | 엔진 | 프로필 | 최신 배포본 | 문서 |
 |---|---|---|---|---|
 | Unholy Maiden | MZ | `profiles/unholy_maiden.js` | `dist/unholy_maiden/ClaudeAutoNav_v50.js` | `games/unholy_maiden/HANDOFF.md` |
-| Zombie's Retreat 2 | MV | `profiles/zombies_retreat_2.js` | `dist/zombies_retreat_2/ClaudeAutoNav_v2.js` | `games/zombies_retreat_2/NOTES.md` |
+| Zombie's Retreat 2 | MV | `profiles/zombies_retreat_2.js` | `dist/zombies_retreat_2/ClaudeAutoNav_v7.js` | `games/zombies_retreat_2/NOTES.md` |
 
 ## 배포 방법
 
@@ -74,7 +74,7 @@ N 키 메뉴 맨 위의 `▶ 봇 자동 진행 시작`으로 켜고, 방향키/E
 - 대사 자동 넘김, 선택지 자동 선택(진행/수락 우선, 거절/치트 회피, 같은 선택지가 반복되면 다른 항목), 이름 입력은 기본값, 숫자 입력 확정, 상점/제작 화면은 닫기
 - 할 일이 없으면 잠자기/시간 경과 이벤트로 시간을 넘김 (프로필 `botSleepChoiceRe`, `botSleepEventRe`, `botTimeCe`)
 - 날짜 변수(`dayVar`)가 있으면 날이 바뀔 때 대화했던 캐릭터와 다시 대화
-- 사격 전투(`botCombat`), 체력 회복(`botHeal`), 직접 해야 하는 장면 건너뛰기(`botManualRe`)
+- 사격 전투(`botCombat`), 체력 회복(`botHeal`), 식량 같은 생존 자원 관리(`botFood`), 직접 해야 하는 장면 건너뛰기(`botManualRe`)
 - 게임 오버: 봇 전용 세이브(`save/autonav_bot.rpgsave`, 게임 슬롯과 별개)에서 다시 시작, 같은 대상은 몇 번만 재시도
 - 막힘 감시: 행동해도 진행(스위치/변수/셀프 스위치/퀘스트/아이템)이 없으면 시간을 넘기고, 그래도 안 되면 정지
 

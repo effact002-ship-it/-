@@ -556,7 +556,11 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                     break;
                 case 205:
                     // 이 이벤트가 플레이어에게서 멀어지는 이동 = 밀어서 움직이는 물체 (석상/책장)
-                    if (depth === 0 && p[0] === 0 && p[1] && p[1].list && p[1].list.some(mc => mc.code === 11)) out.pushSelf = true;
+                    if (depth === 0 && p[0] === 0 && p[1] && p[1].list) {
+                        const cs = p[1].list.map(mc => mc.code), t = cs.indexOf(25);
+                        // '멀어지기' 또는 '플레이어 쪽 보기 -> 뒤로 이동'(상자 밀기)
+                        if (cs.includes(11) || (t >= 0 && cs.indexOf(13, t) > t)) out.pushSelf = true;
+                    }
                     // 플레이어 이동 루트로 순간이동시키는 장치 (전송 함정/텔레포터): 순 이동량을 기록
                     if (depth === 0 && p[0] === -1 && p[1] && p[1].list) {
                         // '앞으로/뒤로/회전'이 있는 경로(문 통과 연출 등)는 바라보는 방향에 따라 결과가 달라지므로 명령 그대로 기록
@@ -2579,22 +2583,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                         if (Cond.all(r.conds, r.map, r.evId) === false) continue;
                         if (!byMap[r.map] && !items.some(i => i.quest === qkey)) {
                             // 목표 장소로 가는 길이 막힘: 막는 조건을 분석해서 선행 할 일로
-                            try {
-                                const bi = this.blockedInfo(r.map, byMap, true, r.evId);
-                                if (bi && bi.failed) {
-                                    const base = { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help: help + (bi.text ? ' / 막힌 곳: ' + bi.text : '') };
-                                    let got = 0;
-                                    const cnt = it => { got++; add(it); };
-                                    this.prereqItems(bi.failed, byMap, field, cnt, base);
-                                    // 같은 출입구의 다른 갈래(다른 페이지 조건)도 확인
-                                    if (!got && bi.leg) {
-                                        Index._ignoreConds = true;
-                                        let alts = [];
-                                        try { alts = Index.edgesOf(bi.leg.from, null).filter(e => e.to.map === bi.leg.to.map && e.failed && e.failed.length); } finally { Index._ignoreConds = false; }
-                                        for (const e of alts) { if (got) break; this.prereqItems(e.failed, byMap, field, cnt, base); }
-                                    }
-                                }
-                            } catch (e) { Index._ignoreConds = false; }
+                            this.blockedPrereq(r.map, r.evId, byMap, field, add, { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help });
                             continue;
                         }
                         if (raw.trigger <= 2) {
@@ -2606,7 +2595,11 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                         continue;
                     }
                     // 지금은 비활성 페이지: 출현 조건 스위치를 켜는 선행 이벤트 / 변수 조건이면 그 변수를 올리는 이벤트
-                    this.prereqItems(Index.pageCondFails(raw.cond, r.map, r.evId), byMap, field, add, { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help });
+                    const pbase = { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help };
+                    const before = this._added || 0;
+                    this.prereqItems(Index.pageCondFails(raw.cond, r.map, r.evId), byMap, field, add, pbase);
+                    // 선행 단계가 목표 장소 안에 있는데 그곳에 갈 수 없으면 길을 여는 것이 먼저
+                    if ((this._added || 0) === before && !byMap[r.map] && !items.some(i => i.quest === qkey)) this.blockedPrereq(r.map, r.evId, byMap, field, add, pbase);
                 }
             }
 
@@ -2923,6 +2916,25 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             return null;
         },
 
+        // 갈 수 없는 장소(이벤트)로 가는 길을 막은 조건 -> 선행 할 일 (같은 출입구의 다른 갈래도 확인)
+        blockedPrereq(mapId, evId, byMap, field, add, base) {
+            try {
+                const bi = this.blockedInfo(mapId, byMap, true, evId);
+                if (!bi || !bi.failed) return 0;
+                base = Object.assign({}, base, { help: (base.help || '') + (bi.text ? ' / 막힌 곳: ' + bi.text : '') });
+                let got = 0;
+                const cnt = it => { got++; add(it); };
+                this.prereqItems(bi.failed, byMap, field, cnt, base);
+                if (!got && bi.leg) {
+                    Index._ignoreConds = true;
+                    let alts = [];
+                    try { alts = Index.edgesOf(bi.leg.from, null).filter(e => e.to.map === bi.leg.to.map && e.failed && e.failed.length); } finally { Index._ignoreConds = false; }
+                    for (const e of alts) { if (got) break; this.prereqItems(e.failed, byMap, field, cnt, base); }
+                }
+                return got;
+            } catch (e) { Index._ignoreConds = false; return 0; }
+        },
+
         // 막힌 조건 목록 -> 선행 할 일 (스위치: 켜는 이벤트, 변수: 올리는 이벤트, 동료: 파티에 넣는 이벤트)
         prereqItems(fails, byMap, field, add, base, depth) {
             const add0 = add; add = it => { this._added = (this._added || 0) + 1; add0(it); };
@@ -3160,6 +3172,34 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
         },
 
         // 조건을 무시하고 경로를 찾은 뒤, 지금 막혀 있는 첫 단계의 이유를 설명
+        // 출입구까지 가는 길을 막은 고정 물체 중, 치우면 길이 열리고 뒤 페이지(조건부)가 있는 것 -> 그 페이지 조건
+        gateConds(leg, start) {
+            const map = Index.maps[leg.from]; if (!map) return null;
+            const obst = Index.obstacles(leg.from);
+            const reach = o => Planner.spotDist(map, Planner.staticBfs(map, start.x, start.y, o), leg.ex, leg.ey, leg.prio, leg.hb) >= 0;
+            if (reach(obst)) return null;
+            for (const ev of map.events) {
+                const pg = Index.activePage(map, ev);
+                if (!pg || pg.prio !== 1) continue;
+                const pi = ev.pages.indexOf(pg);
+                let failed = null;
+                for (let j = ev.pages.length - 1; j > pi; j--) { const f = Index.pageCondFails(ev.pages[j].cond, leg.from, ev.id); if (f.length && f.length <= 2) { failed = f; break; } }
+                if (!failed) continue;
+                const o2 = new Set(obst); o2.stop = new Set(); for (const k of ['push', 'oneway']) if (obst[k]) o2[k] = obst[k]; // 문 앞 조사 지점(밟으면 시작)은 열린 뒤 사라지므로 통과로 봄
+                const tiles = hbTiles(ev.x, ev.y, pg.hb || ev.hb);
+                for (const [tx, ty] of tiles) o2.delete(ty * map.w + tx);
+                if (reach(o2)) return { failed, evId: ev.id, name: ev.name };
+                // 철책처럼 칸 자체는 못 지나가고 열린 뒤 이벤트가 반대편으로 옮겨 주는 경우: 맞은편 칸에서 확인
+                const d0 = Planner.staticBfs(map, start.x, start.y, o2);
+                for (const [tx, ty] of tiles) for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+                    const ax = tx + dx, ay = ty + dy, bx = tx - dx, by = ty - dy;
+                    if (ax < 0 || ay < 0 || bx < 0 || by < 0 || ax >= map.w || bx >= map.w || ay >= map.h || by >= map.h) continue;
+                    if (d0[ay * map.w + ax] < 0) continue;
+                    if (Planner.spotDist(map, Planner.staticBfs(map, bx, by, o2), leg.ex, leg.ey, leg.prio, leg.hb) >= 0) return { failed, evId: ev.id, name: ev.name };
+                }
+            }
+            return null;
+        },
         blockedReason(targetMap) { const r = this.blockedInfo(targetMap); return r ? r.text : ''; },
         blockedInfo(targetMap, byNormal, exact, targetEv) {
             Index._ignoreConds = true;
@@ -3181,7 +3221,9 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                 }
                 if (!exact) for (const m in by2) if (Index.rootId(Number(m)) === root && (!node || by2[m][0].cost < node.cost)) node = by2[m][0];
                 if (!node) return null;
-                for (const e of Planner.legsTo(node)) {
+                const legs = Planner.legsTo(node);
+                for (let li = 0; li < legs.length; li++) {
+                    const e = legs[li];
                     // 시간대 같은 상태 스위치로만 막힌 곳은 시간이 지나면 풀리므로 다음 원인을 봄
                     if (e.failed && e.failed.length && e.failed.every(c => c.k === 'if' && c.p[0] === 0 && Index.volatileSw && Index.volatileSw.has(c.p[1]))) continue;
                     if (e.failed && e.failed.length) {
@@ -3189,6 +3231,14 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                     }
                     // 조건은 맞지만 지금 위치 기준으로는 그 출입구까지 걸어서 못 가는 경우 (맵 안의 장애물)
                     if (byNormal && byNormal[e.from] && !byNormal[e.to.map] && e.kind === 'event') {
+                        // 길을 막은 물체(철책 등)가 나중 페이지에서 열리면 그 페이지 조건이 선행 조건
+                        // 실제로 들어갈 수 있는 지점(현재 조건) 기준으로 확인
+                        const starts = (byNormal[e.from] || []).map(n => n.s);
+                        if (e.from === $gameMap.mapId()) starts.unshift({ x: $gamePlayer.x, y: $gamePlayer.y });
+                        Index._ignoreConds = false;
+                        let gate = null;
+                        try { for (const st of starts) { gate = this.gateConds(e, st); if (gate) break; } } finally { Index._ignoreConds = true; }
+                        if (gate) return { leg: e, failed: gate.failed, stuck: true, gateEv: gate.evId, text: Index.maps[e.from].name + ' ' + (gate.name || '장애물') + ': ' + gate.failed.map(c => Index.describeCond(c)).join(', ') };
                         return { leg: e, failed: [], stuck: true, text: Index.maps[e.from].name + ' (' + e.ex + ',' + e.ey + ') 까지 가는 길이 막혀 있음' };
                     }
                 }
