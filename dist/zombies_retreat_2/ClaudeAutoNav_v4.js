@@ -1730,6 +1730,8 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             const leg = this.curLeg();
             NavLog.add('LEG ' + (leg ? leg.kind + ' from ' + leg.from + ' ev' + (leg.evId || leg.itemId) + ' -> ' + leg.to.map : 'final, queue=' + JSON.stringify(this.queue)));
             const total = this._totalLegs || 0;
+            // 밟는 순간 시작되는 이벤트(출입구 등)는 도착 처리 전에 선택지가 뜨므로 미리 준비
+            this.pendingChoices = leg ? (leg.choices || []).slice() : (this.queue && this.queue.length <= 1 ? (this.finalChoices || []).slice() : []);
             if (leg) {
                 this.phase = leg.kind === 'item' ? 'item' : 'walk';
                 const m = Index.maps[leg.to.map];
