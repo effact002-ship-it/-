@@ -1758,7 +1758,11 @@
             const leg = this.curLeg();
             if (!leg || !leg.warp || leg.to.map !== $gameMap.mapId()) return;
             const it = $gameMap._interpreter, evId = it && it._eventId;
-            const map = Index.maps[$gameMap.mapId()], ev = evId && Index.findEvent(map.id, evId), pg = ev && Index.activePage(map, ev);
+            const map = Index.maps[$gameMap.mapId()], ev = evId && Index.findEvent(map.id, evId);
+            // 실행 중인 페이지 (이벤트가 시작하자마자 자기 스위치를 바꾸면 '지금 조건의 페이지'와 다름)
+            const raw = $dataMap && $dataMap.events[evId];
+            const pi = raw ? raw.pages.findIndex(p => p.list === it._list) : -1;
+            const pg = ev && (pi >= 0 ? ev.pages[pi] : Index.activePage(map, ev));
             if (!pg || !pg.pmoves || !pg.pmoves.length) return;
             const vx = leg.to.x - $gamePlayer.x, vy = leg.to.y - $gamePlayer.y;
             let best = null, bs = 0;
