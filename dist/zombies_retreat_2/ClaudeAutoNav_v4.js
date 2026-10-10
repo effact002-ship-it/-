@@ -2605,7 +2605,8 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                         }
                     }
                     // 조사 지점: 조사/접촉하면 스위치·셀프 스위치가 바뀌는 이벤트. 그 결과로 컷신/획득/이동이 열리면 중요
-                    if (!done && pg.n > 1 && (pg.ssOn.length || pg.swOn.length) && !pg.transfers.length && !pg.battle && !pg.enemy) {
+                    const realSw = pg.swOn.filter(v => !(Index.volatileSw && Index.volatileSw.has(v)));
+                    if (!done && pg.n > 1 && (pg.ssOn.length || realSw.length) && !pg.transfers.length && !pg.battle && !pg.enemy && !(pg.pmoves && pg.pmoves.length)) {
                         const nextPg = ev.pages.find(p2 => p2 !== pg && ((p2.cond.selfSwitchValid && pg.ssOn.includes(p2.cond.selfSwitchCh)) ||
                             (p2.cond.switch1Valid && pg.swOn.includes(p2.cond.switch1Id))));
                         const strong = !!nextPg && (nextPg.trigger === 3 || nextPg.gain || nextPg.dmsgs >= 3 || nextPg.transfers.length > 0);
@@ -3112,6 +3113,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             rest.sort((a, b) => (a.prio - b.prio) || ((a.hops || 0) - (b.hops || 0)));
             for (const it of rest) cands.push(it);
             for (const g of rec.groups) if (g.explore) { const em = g.exploreMap || g.map; if (em !== $gameMap.mapId() && byMap[em]) cands.push({ type: 'go', map: em, evId: 0, label: '[탐색] ' + Index.maps[em].name, prio: 7, hops: byMap[em][0].hops }); }
+            this.lastCands = cands.slice(0, 4).map(c => (c.label || '?') + (ok(c) ? '' : '(제외)'));
             for (const it of cands) {
                 if (!ok(it)) continue;
                 // 같은 대상을 연달아 3번 고르면 다른 것
@@ -3355,6 +3357,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             const k = this.keyOf(it);
             this.recent.push(k); if (this.recent.length > 12) this.recent.shift();
             this.stats.actions++;
+            if (this.lastCands && this.lastCands.length) BotLog.add('  후보: ' + this.lastCands.join(' | '));
             BotLog.add('DO #' + this.stats.actions + ' ' + it.label + ' @' + (Index.maps[it.map] ? Index.maps[it.map].name : it.map) + (it.evId ? ' ev' + it.evId : '') + ' (prio ' + it.prio + ', 진행 ' + sig + ')');
             this.cur = it;
             this.acted = true;
@@ -3366,8 +3369,13 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
         chooseIndex(win) {
             const n = win.maxItems();
             const names = []; for (let i = 0; i < n; i++) names.push(String(win.commandName(i) || ''));
-            const sigKey = $gameMap.mapId() + ':' + names.join('|');
-            const seen = this.choiceSeen[sigKey] = (this.choiceSeen[sigKey] || 0) + 1;
+            // 반복 판단: 같은 이벤트의 같은 선택지가 1분 안에 다시 나올 때만
+            const evId = $gameMap._interpreter && $gameMap._interpreter.eventId ? $gameMap._interpreter.eventId() : 0;
+            const sigKey = $gameMap.mapId() + ':' + evId + ':' + names.join('|');
+            const rec = this.choiceSeen[sigKey] && Graphics.frameCount - this.choiceSeen[sigKey].t < 3600 ? this.choiceSeen[sigKey] : { n: 0 };
+            rec.n++; rec.t = Graphics.frameCount; this.choiceSeen[sigKey] = rec;
+            const seen = rec.n;
+            if (seen > 8 && Runner.active) { BotLog.add('LOOP 같은 선택지 ' + seen + '회 -> 이번 이동 중단'); Runner.stop('같은 선택지가 반복되어 이동 실패'); }
             const prefer = PROF.botChoicePrefer || /네|예|좋아|수락|한다|할게|도와|가자|응|그래|yes|ok|sure|accept/i;
             const avoid = /아니|싫|취소|그만|나중|거절|됐어|떠난|나가|^no\b|cancel|quit|leave|back/i;
             const scored = names.map((t, i) => {
