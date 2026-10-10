@@ -391,6 +391,7 @@
                     let m;
                     if ((m = /^AddCommonEventMenu\s+(.+)$/i.exec(s))) ceMenu = ceMenu.concat(numList(m[1].replace(/to/gi, ' ')));
                     else if (/^ClearCommonEventMenu/i.test(s)) ceMenu = [];
+                    else if (/^OpenSynthesis/i.test(s)) out.synth = true; // 제작 화면 (YEP_ItemSynthesis)
                     else if (/^OpenCommonEventMenu/i.test(s) && depth < 3) {
                         for (const id of ceMenu) {
                             const ce = scanCommon(id, depth + 1);
@@ -701,6 +702,22 @@
             for (const ce of $dataCommonEvents) if (ce) addStock(scanCommon(ce.id, 1).stock || []);
             // 스위치를 켜는 이벤트 색인 (본편 목표 역추적용)
             this.switchSetters = {};
+            // 제작 (YEP_ItemSynthesis): 재료 <Synthesis Ingredients>, 제작법 <Item Recipe: x>
+            this.synthIng = {}; this.synthRecipeBy = {}; this.synthStations = [];
+            if (HAS('YEP_ItemSynthesis')) {
+                for (const it of $dataItems) {
+                    if (!it || !it.note) continue;
+                    const m = /<Synthesis Ingredients>([\s\S]*?)<\/Synthesis Ingredients>/i.exec(it.note);
+                    if (m) {
+                        const ing = [];
+                        m[1].replace(/(item|weapon|armor)\s+(\d+)\s*:\s*(\d+)/gi, (_, k, id, q) => { ing.push([/item/i.test(k) ? 0 : /weapon/i.test(k) ? 1 : 2, Number(id), Number(q)]); return ''; });
+                        m[1].replace(/^\s*(item|weapon|armor)\s+(\d+)\s*$/gim, (_, k, id) => { ing.push([/item/i.test(k) ? 0 : /weapon/i.test(k) ? 1 : 2, Number(id), 1]); return ''; });
+                        if (ing.length) this.synthIng[it.id] = ing;
+                    }
+                    it.note.replace(/<Item Recipe:\s*([^>]+)>/gi, (_, list) => { for (const n of list.match(/\d+/g) || []) (this.synthRecipeBy[n] = this.synthRecipeBy[n] || []).push(it.id); return ''; });
+                }
+                for (const id in this.maps) for (const ev of this.maps[id].events) ev.pages.forEach((pg, pi) => { if (pg.synth) this.synthStations.push({ map: Number(id), evId: ev.id, page: pi }); });
+            }
             // 파티에 캐릭터를 넣는 이벤트 (동행)
             this.partySetters = {};
             for (const id in this.maps) for (const ev of this.maps[id].events) {
@@ -1348,7 +1365,7 @@
             vars: s.vars, changes: s.changes, recover: s.recover, dmsgs: s.dmsgs, dchanges: s.dchanges, gains: s.gains,
             danger: s.danger || s.transfers.some(t => Index.endingMaps && Index.endingMaps.has(t.map)),
             te: te, choices: s.choices, effects: s.effects, dsw: s.dsw, swOn: s.swOn, pmove: s.pmoves && s.pmoves.length ? null : (s.pmove || null), pmoves: s.pmoves || null, push: !!s.pushSelf, hev: !!s.hev, gainIds: s.gainIds, stock: s.stock,
-            ssOn: s.ssOn, loseIds: s.loseIds, quest: s.quest, vops: s.vops, ssExt: s.ssExt, ces: s.ces, swOff: s.swOff || [], swCond: s.swCond, partyAdd: s.partyAdd,
+            ssOn: s.ssOn, loseIds: s.loseIds, quest: s.quest, vops: s.vops, ssExt: s.ssExt, ces: s.ces, swOff: s.swOff || [], swCond: s.swCond, partyAdd: s.partyAdd, synth: !!s.synth,
             hb: Adapt.hitbox(cmt),
             // 적: 추격형(YEP_EventChasePlayer) 또는 총알 판정(<projEffect>, GALV_MapProjectiles)이 있고 접촉 시 발동하는 이벤트
             enemy: Adapt.isChaser(pg) || (/<projEffect>/i.test(cmt) && pg.trigger === 2 && !!(pg.image && pg.image.characterName)),
@@ -2763,6 +2780,19 @@
             const key = 'i' + itemId;
             if (depth > 5 || seen.has(key)) return null;
             seen.add(key);
+            // 제작으로 만들 수 있으면: 제작법(파티가 가진 안내서)과 재료가 있을 때 제작대로
+            const ing = Index.synthIng && Index.synthIng[itemId];
+            if (ing && (Index.synthRecipeBy[itemId] || []).some(r => $gameParty.hasItem($dataItems[r]))) {
+                const enough = ing.every(([k, id, q]) => $gameParty.numItems((k === 0 ? $dataItems : k === 1 ? $dataWeapons : $dataArmors)[id]) >= q);
+                if (enough) {
+                    for (const st of Index.synthStations) {
+                        const map = Index.maps[st.map], ev = Index.findEvent(st.map, st.evId), raw = ev && ev.pages[st.page];
+                        if (!raw || Index.activePage(map, ev) !== raw || !byMap[st.map]) continue;
+                        const r = Planner.reach(st.map, st.evId, byMap, field);
+                        if (r.ok) return { map: st.map, evId: st.evId, hops: r.hops, depth, choices: [], synth: itemId };
+                    }
+                }
+            }
             const srcs = Index.itemSources(itemId).sort((a, b) => (a.kind === 'shop' ? 0 : 1) - (b.kind === 'shop' ? 0 : 1));
             for (const sc of srcs) {
                 const map = Index.maps[sc.map], ev = Index.findEvent(sc.map, sc.evId), raw = ev && ev.pages[sc.page];
@@ -2787,7 +2817,7 @@
                 if (c.k !== 'if') continue;
                 if ((c.p[0] === 0 && c.p[2] === 0 && !c.neg) || (c.p[0] === 8 && !c.neg)) {
                     const g = c.p[0] === 0 ? this.findSetter(c.p[1], byMap, field, 1) : this.findItem(c.p[1], byMap, field, 1);
-                    if (g) add(Object.assign({ type: 'talk', map: g.map, evId: g.evId, choices: g.choices || [] }, base));
+                    if (g) add(Object.assign({ type: 'talk', map: g.map, evId: g.evId, choices: g.choices || [], synth: g.synth || 0 }, base, g.synth ? { label: base.label.replace('(선행 단계)', '(' + (($dataItems[g.synth] || {}).name || '아이템') + ' 제작)') } : {}));
                 } else if (c.p[0] === 1) this.varPrereq(c.p[1], byMap, field, add, base);
                 else if (c.p[0] === 4 && !c.neg) {
                     for (const st of (Index.partySetters[c.p[1]] || [])) {
@@ -3199,6 +3229,7 @@
             else if (it.type === 'pickup') opts = { mode: 'pickup', queue: [it.evId] };
             else if (it.type !== 'go') opts = { mode: 'talk', queue: [it.evId], choices: it.choices || [] };
             this.pendingSleep = !!it.sleep;
+            this.pendingSynth = it.synth || 0;
             Runner.start(plan, '[봇] ' + String(it.label || '').replace(/^(\[[^\]]+\]\s*)+/, ''), opts);
             return true;
         },
@@ -3536,6 +3567,22 @@
         _Scene_MenuBase_update.call(this);
         if (!Bot.active || this instanceof Scene_AutoNav || SceneManager.isSceneChanging()) return;
         this._navBotTimer = (this._navBotTimer || 0) + 1;
+        // 제작 화면: 봇이 만들려는 아이템이 있으면 골라서 1개 제작
+        if (this._navBotTimer === 30 && Bot.pendingSynth && typeof Scene_Synthesis !== 'undefined' && this instanceof Scene_Synthesis) {
+            const id = Bot.pendingSynth; Bot.pendingSynth = 0;
+            try {
+                if (this._commandWindow && this._commandWindow.selectSymbol) this._commandWindow.selectSymbol('item');
+                const lw = this._listWindow; lw.refresh();
+                const idx = (lw._data || []).findIndex(it => it && it.id === id && DataManager.isItem(it));
+                if (idx >= 0 && lw.isEnabled(lw._data[idx])) {
+                    lw.select(idx); this.onListOk();
+                    if (this._numberWindow) this._numberWindow._number = 1;
+                    this.onNumberOk();
+                    BotLog.add('SYNTH ' + $dataItems[id].name + ' 제작');
+                } else BotLog.add('SYNTH ' + ($dataItems[id] || {}).name + ' 목록에 없거나 재료 부족');
+            } catch (e) { BotLog.add('SYNTH 오류 ' + e); }
+            return;
+        }
         if (this._navBotTimer !== 60) return;
         const name = this.constructor && this.constructor.name;
         try {
