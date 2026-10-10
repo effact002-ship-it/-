@@ -3361,13 +3361,22 @@
             for (const it of rest) cands.push(it);
             for (const g of rec.groups) if (g.explore) { const em = g.exploreMap || g.map; if (em !== $gameMap.mapId() && byMap[em]) cands.push({ type: 'go', map: em, evId: 0, label: '[탐색] ' + Index.maps[em].name, prio: 7, hops: byMap[em][0].hops }); }
             this.lastCands = cands.slice(0, 4).map(c => (c.label || '?') + (ok(c) ? '' : '(제외)'));
-            for (const it of cands) {
-                if (!ok(it)) continue;
-                // 같은 대상을 연달아 3번 고르면 다른 것
-                if (this.recent.filter(k => k === this.keyOf(it)).length >= 3) continue;
-                return it;
+            const usable = cands.filter(it => ok(it) && this.recent.filter(k => k === this.keyOf(it)).length < 3); // 같은 대상을 연달아 3번 고르면 다른 것
+            if (!usable.length) return null;
+            const hopsOf = it => it.map === $gameMap.mapId() ? 0 : (byMap[it.map] ? byMap[it.map][0].hops : 99);
+            // 1) 하던 퀘스트 단계가 아직 남아 있으면 계속 (목표를 자주 바꾸지 않음)
+            if (this.goalQuest) {
+                const g = usable.filter(it => it.quest === this.goalQuest);
+                if (g.length) return g.sort((a, b) => hopsOf(a) - hopsOf(b))[0];
+                this.goalQuest = null;
             }
-            return null;
+            // 2) 첫 후보와 우선순위가 비슷한(0.5 이내) 것 중 가장 가까운 곳 -> 같은 구역 일을 몰아서 처리
+            const top = usable[0], tp = top.prio === undefined ? 9 : top.prio;
+            const near = usable.filter(it => (it.prio === undefined ? 9 : it.prio) <= tp + 0.5);
+            near.sort((a, b) => (hopsOf(a) - hopsOf(b)) || ((a.prio || 9) - (b.prio || 9)));
+            const pick = near[0];
+            if (pick.quest) this.goalQuest = pick.quest;
+            return pick;
         },
 
         // 할 일이 없을 때: 잠자기(다음 날) 같은 시간 넘기기 이벤트. 없으면 시간 경과 이벤트(프로필 botTimeCe)
@@ -3556,7 +3565,7 @@
                 const k = this.keyOf(this.cur);
                 if (Runner.lastFail) {
                     // 시간 초과/길 막힘은 오래 걸리고 다시 해도 같으므로 크게 감점
-                    const heavy = /시간 초과|길이 막힘|제자리/.test(Runner.status || '');
+                    const heavy = /시간 초과|길이 막힘|제자리|예상 밖/.test(Runner.status || '');
                     this.bad[k] = (this.bad[k] || 0) + (heavy ? 2 : 1); this.badTotal = this.badTotal || {}; this.badTotal[k] = (this.badTotal[k] || 0) + (heavy ? 2 : 1);
                     BotLog.add('FAIL ' + this.cur.label + ' : ' + Runner.status);
                 }
@@ -3594,11 +3603,13 @@
                 if (it) { this.stats.sleeps++; if (it.timeKey) this.bad[it.timeKey] = (this.bad[it.timeKey] || 0) + 1; }
                 this.noProg = 0;
             }
-            if (!it && this.foodShort() > 0) {
+            // 식량: 오늘 밤 몫이 모자라면 먼저. 여유분(며칠 치)은 급한 일이 없을 때(대화/탐색 정도만 남았을 때) 채움
+            const nextIt = !it ? this.pickNext(rec, by) : null;
+            if (!it && (this.foodShort(1) > 0 || (this.foodShort() > 0 && (!nextIt || (nextIt.prio === undefined ? 9 : nextIt.prio) >= 2)))) {
                 it = this.foodItem(by);
                 if (it && this.lastFoodLog !== $gameVariables.value(PROF.dayVar || 0)) { this.lastFoodLog = $gameVariables.value(PROF.dayVar || 0); BotLog.add('FOOD 부족 ' + this.foodShort() + '개' + (this.foodCritical() ? ' (경고 상태: 이대로 자면 게임 오버)' : '')); }
             }
-            if (!it) it = this.pickNext(rec, by);
+            if (!it) it = nextIt;
             if (!it && PROF.botCombat && this.enemiesOnMap() > 0 && (this.huntWait = (this.huntWait || 0) + 1) <= 20) {
                 // 할 일이 없는데 적이 있음: 잠시 기다리며 사격 (적을 처치해야 열리는 장면)
                 if (this.huntWait === 1) BotLog.add('WAIT 적 ' + this.enemiesOnMap() + '마리, 사격하며 대기');
