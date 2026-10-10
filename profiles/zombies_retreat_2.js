@@ -38,6 +38,7 @@
     botFood: {
         items: [7, 8, 9, 13],
         warnSwitch: 25,
+        buffer: 3,                                        // 3일 치까지 모아 둠 (수색 결과가 무작위라 여유분)
         need: () => { const n = $gameVariables.value(15), a = $gameSwitches.value(22), b = $gameSwitches.value(21);
             const base = n >= 6 ? 5 : n >= 4 ? 4 : n >= 2 ? 3 : 2; return a ? base + 1 : b ? base - 1 : base; }
     },

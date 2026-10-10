@@ -25,6 +25,12 @@
  * @default
  * @desc 이동 명령 전에 대화가 이보다 많으면 스토리 이벤트로 보고 경로에서 제외. 비워 두면 게임 프로필 값 (기본 2)
  *
+ * @param botTextWait
+ * @text 봇 대사 넘김 간격
+ * @type number
+ * @default 45
+ * @desc 봇이 대사 한 창을 넘기기까지 기다리는 프레임 수 (60 = 1초). 클수록 천천히 넘김
+ *
  * @param travelItemPattern
  * @text 이동용 아이템 이름 패턴
  * @default
@@ -99,6 +105,8 @@
     const OPEN_KEY = Number(P.openKey || 78);
     const EXCL_RE = new RegExp(P.excludeMapPattern || PROF.excludeMapPattern, 'i');
     const EXCL_IDS = P.excludeMapIds ? numList(P.excludeMapIds) : (PROF.excludeMapIds || []);
+    // 봇이 대사를 넘기는 간격(프레임, 60 = 1초). 플러그인 파라미터/프로필 botTextWait로 조정
+    const BOT_TEXT_WAIT = Number(P.botTextWait || PROF.botTextWait || 45);
     const MAX_MSG = Number(P.maxStoryMessages || PROF.maxStoryMessages || 2);
     const ITEM_RE = new RegExp(P.travelItemPattern || PROF.travelItemPattern);
 
@@ -1744,6 +1752,23 @@
             }
         },
 
+        // 같은 맵 안 출입구 선택지: 계획할 때와 스위치가 바뀌었을 수 있으므로(들어올 때/나갈 때 페이지가 다름)
+        // 지금 실행 중인 페이지에서 목표 쪽으로 움직이는 갈래의 선택지로 다시 정함
+        fixWarpChoice(win) {
+            const leg = this.curLeg();
+            if (!leg || !leg.warp || leg.to.map !== $gameMap.mapId()) return;
+            const it = $gameMap._interpreter, evId = it && it._eventId;
+            const map = Index.maps[$gameMap.mapId()], ev = evId && Index.findEvent(map.id, evId), pg = ev && Index.activePage(map, ev);
+            if (!pg || !pg.pmoves || !pg.pmoves.length) return;
+            const vx = leg.to.x - $gamePlayer.x, vy = leg.to.y - $gamePlayer.y;
+            let best = null, bs = 0;
+            for (const bm of pg.pmoves) { const sc = bm.dx * vx + bm.dy * vy; if (sc > bs) { bs = sc; best = bm; } }
+            if (!best) return;
+            const names = []; for (let i = 0; i < win.maxItems(); i++) names.push(win.commandName(i));
+            const tok = best.conds.filter(isChoiceCond).map(choiceToken).find(t => names.includes(t));
+            if (tok && this.pendingChoices[0] !== tok) { NavLog.add('WARP 선택지 보정 ev' + evId + ': ' + (this.pendingChoices[0] || '-') + ' -> ' + tok); this.pendingChoices = [tok]; }
+        },
+
         replan(reason) {
             this.fails++;
             NavLog.add('REPLAN #' + this.fails + ' ' + reason);
@@ -1782,6 +1807,8 @@
             if (leg) {
                 if (leg.to.map !== leg.from && $gameMap.mapId() === leg.to.map) { this.legs.shift(); this.beginLeg(); return; }
                 if ($gameMap.mapId() !== leg.from) { this.replan('예상과 다른 맵'); return; }
+                // 같은 맵 안 출입구(밟으면 이동)를 걷다가 이미 지나서 도착한 경우
+                if (leg.warp && leg.to.map === leg.from && $gamePlayer.x === leg.to.x && $gamePlayer.y === leg.to.y) { NavLog.add('WARP 도착 확인 ev' + leg.evId); this.legs.shift(); this.beginLeg(); return; }
                 this.walkTo(leg.evId, leg.prio, () => this.triggerEvent(leg.evId, leg.prio, leg.trigger, leg.choices), leg.spot ? [leg.spot] : null);
             } else if (this.phase === 'walkFinal') {
                 if (this.exitTo && $gameMap.mapId() === this.exitTo) { this.finish('도착: ' + Index.maps[this.exitTo].name); return; }
@@ -2157,6 +2184,10 @@
             const ge = $gameMap.event(evId);
             if (!ge || ge._erased) { this.failLeg('대상 이벤트 없음'); return; }
             if (this.frames > 60 * 120) { this.failLeg('시간 초과'); return; }
+            // 같은 칸에 오래 서 있으면(이동 불가 상태로 반복) 일찍 포기 -> 시간대가 지나가는 것을 막음
+            const pk = $gameMap.mapId() + ':' + $gamePlayer.x + ',' + $gamePlayer.y;
+            if (this._stillKey !== pk) { this._stillKey = pk; this._stillFrames = 0; }
+            else if (++this._stillFrames > 60 * 15) { this._stillFrames = 0; this.failLeg('제자리에서 움직이지 못함'); return; }
             if (this.targetPos && (this.targetPos.x !== ge.x || this.targetPos.y !== ge.y)) this.path = null;
             // 미끄러짐/강제 이동 등으로 예상 위치에서 벗어나면 경로 재계산
             if (this.path && this.path.expect && (this.path.expect.x !== $gamePlayer.x || this.path.expect.y !== $gamePlayer.y)) this.path = null;
@@ -3281,13 +3312,14 @@
 
         // 다음에 할 일 고르기
         // 생존 자원 (프로필 botFood: { items, need(), warnSwitch }): 밤마다 소비되는 식량이 모자라면 먼저 확보
-        foodShort() {
+        // days: 며칠 치를 기준으로 볼지 (기본: 프로필 buffer일 치, 여유분 포함)
+        foodShort(days) {
             const F = PROF.botFood; if (!F || typeof $dataItems === 'undefined') return 0;
             const have = F.items.reduce((s, i) => s + ($dataItems[i] ? $gameParty.numItems($dataItems[i]) : 0), 0);
             const need = typeof F.need === 'function' ? F.need() : (F.need || 0);
-            return Math.max(0, need - have);
+            return Math.max(0, need * (days || F.buffer || 2) - have);
         },
-        foodCritical() { const F = PROF.botFood; return !!(F && this.foodShort() > 0 && (!F.warnSwitch || $gameSwitches.value(F.warnSwitch))); },
+        foodCritical() { const F = PROF.botFood; return !!(F && this.foodShort(1) > 0 && (!F.warnSwitch || $gameSwitches.value(F.warnSwitch))); },
         // 이 항목이 시간을 넘기는 공통 이벤트(다음 날 등)를 부르는지
         passesTime(it) {
             const map = Index.maps[it.map], ev = map && it.evId && Index.findEvent(it.map, it.evId), pg = ev && Index.activePage(map, ev);
@@ -3518,7 +3550,7 @@
                 const k = this.keyOf(this.cur);
                 if (Runner.lastFail) {
                     // 시간 초과/길 막힘은 오래 걸리고 다시 해도 같으므로 크게 감점
-                    const heavy = /시간 초과|길이 막힘/.test(Runner.status || '');
+                    const heavy = /시간 초과|길이 막힘|제자리/.test(Runner.status || '');
                     this.bad[k] = (this.bad[k] || 0) + (heavy ? 2 : 1); this.badTotal = this.badTotal || {}; this.badTotal[k] = (this.badTotal[k] || 0) + (heavy ? 2 : 1);
                     BotLog.add('FAIL ' + this.cur.label + ' : ' + Runner.status);
                 }
@@ -3670,14 +3702,14 @@
         const midText = this._textState && this._textState.text && this._textState.index < this._textState.text.length;
         if ((Runner.active || Bot.active) && NavCfg.autoText && (midText || (!$gameMessage.isChoice() && !$gameMessage.isNumberInput() && !$gameMessage.isItemChoice()))) {
             this._navWait = (this._navWait || 0) + 1;
-            if (this._navWait >= (Bot.active ? 20 : NavCfg.textWait)) { this._navWait = 0; return true; }
+            if (this._navWait >= (Bot.active ? BOT_TEXT_WAIT : NavCfg.textWait)) { this._navWait = 0; return true; }
         }
         return false;
     };
 
     const _Window_ChoiceList_start = Window_ChoiceList.prototype.start;
     Window_ChoiceList.prototype.start = function() {
-        this._navDoorDone = false;
+        this._navDoorDone = false; this._navWarpFix = false;
         _Window_ChoiceList_start.call(this);
     };
 
@@ -3697,6 +3729,7 @@
                 }
             }
         }
+        if (Runner.active && this.isOpen() && this.active && !this._navWarpFix) { this._navWarpFix = true; Runner.fixWarpChoice(this); }
         // 봇: 경로에 정해진 선택지가 없으면 정책에 따라 선택 (잠깐 기다린 뒤)
         if (Bot.active && !(Runner.active && Runner.pendingChoices.length) && this.isOpen() && this.active) {
             this._navBotWait = (this._navBotWait || 0) + 1;
