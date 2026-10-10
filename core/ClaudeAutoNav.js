@@ -1761,7 +1761,9 @@
             const map = Index.maps[$gameMap.mapId()], ev = evId && Index.findEvent(map.id, evId);
             // 실행 중인 페이지 (이벤트가 시작하자마자 자기 스위치를 바꾸면 '지금 조건의 페이지'와 다름)
             const raw = $dataMap && $dataMap.events[evId];
-            const pi = raw ? raw.pages.findIndex(p => p.list === it._list) : -1;
+            const sig = l => l.length + ':' + l.map(c => c.code).join(',');
+            let pi = raw ? raw.pages.findIndex(p => p.list === it._list) : -1;
+            if (pi < 0 && raw && it._list) { const s0 = sig(it._list); pi = raw.pages.findIndex(p => sig(p.list) === s0); } // 플러그인이 목록을 복사한 경우
             const pg = ev && (pi >= 0 ? ev.pages[pi] : Index.activePage(map, ev));
             if (!pg || !pg.pmoves || !pg.pmoves.length) return;
             const vx = leg.to.x - $gamePlayer.x, vy = leg.to.y - $gamePlayer.y;
