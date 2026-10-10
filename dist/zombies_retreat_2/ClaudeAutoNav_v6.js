@@ -771,6 +771,9 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
             this.condVars = new Set();
             for (const id in this.maps) for (const ev of this.maps[id].events) for (const pg of ev.pages) if (pg.cond.variableValid) this.condVars.add(pg.cond.variableId);
             for (const v of Object.keys(this.varItem || {})) this.condVars.delete(Number(v));
+            // 난수로 정해지는 변수는 스토리 변수가 아님
+            for (const v of (this._randVars || [])) this.condVars.delete(v);
+            for (const v of (PROF.ignoreVars || [])) this.condVars.delete(v);
             // 변수를 올리는 이벤트 색인 (대화 단계 같은 변수 조건 역추적용)
             this.varSetters = {};
             for (const id in this.maps) for (const ev of this.maps[id].events) {
@@ -863,6 +866,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                 for (let v = q[0]; v <= q[1]; v++) {
                     const k = q[3] === 3 && q[4] >= 0 && q[4] <= 2 ? q[4] + ':' + q[5] : 'x';
                     (vic[v] = vic[v] || new Set()).add(k);
+                    if (q[3] === 2) (this._randVars = this._randVars || new Set()).add(v); // 난수 대입
                 }
             }
         },
@@ -2925,7 +2929,7 @@ window.ClaudeAutoNavProfile = // Zombie's Retreat 2 (RPG Maker MV) - v1.1.0 손�
                 if (n >= 2) break;
                 const map = Index.maps[st.map], ev = Index.findEvent(st.map, st.evId);
                 const raw = ev && ev.pages[st.page];
-                if (!raw || raw.danger || !byMap[st.map]) continue;
+                if (!raw || raw.danger || !byMap[st.map] || isIgnored(ev) || (PROF.botManualRe && PROF.botManualRe.test(ev.name || ''))) continue;
                 if (Index.activePage(map, ev) !== raw) {
                     // 지금은 닫힌 장면: 그 장면을 여는 조건(스위치/아이템/동료)을 거슬러 올라감
                     const fails = Index.pageCondFails(raw.cond, st.map, st.evId);
