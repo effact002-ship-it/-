@@ -25,6 +25,7 @@
     talkWithoutName: true,
     // 추천에서 뺄 이벤트: 치트 일지, 업데이트/조명 처리, 미니게임(낚시)
     ignoreEventRe: /^Journal$|Cheat|Debug|Updater|Lighting|^Light$|Fishing/i,
+    ignoreSwitches: [1, 2, 3, 4, 5, 12],                  // 시간대 스위치(아침~자정): 진행 조건 역추적에서 제외 (시간이 지나면 바뀜)
     dayVar: 1,                                            // 날짜 변수: 날이 바뀌면 대화했던 캐릭터와 다시 대화 (대화 단계 변수로 스토리 진행)
     // 봇 설정
     botHeal: { hpVar: 18, below: 1, items: [12, 5] },     // HP(변수 18)가 1 이하면 구급상자 -> 약초

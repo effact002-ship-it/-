@@ -318,7 +318,7 @@
     //=========================================================================
     const ceCache = {};
     function scanList(list, depth) {
-        const out = { transfers: [], shop: null, speaker: '', msgs: 0, gain: false, battle: false, vars: [], changes: false, recover: false, dmsgs: 0, dchanges: false, gains: [], danger: false, choices: false, effects: [], dsw: false, selVars: [], wanted: [], swOn: [], gainIds: [], stock: [], ssOn: [], loseIds: [], quest: [], vops: [], ssExt: [], ces: [] };
+        const out = { transfers: [], shop: null, speaker: '', msgs: 0, gain: false, battle: false, vars: [], changes: false, recover: false, dmsgs: 0, dchanges: false, gains: [], danger: false, choices: false, effects: [], dsw: false, selVars: [], wanted: [], swOn: [], gainIds: [], stock: [], ssOn: [], loseIds: [], quest: [], vops: [], ssExt: [], ces: [], swCond: {}, partyAdd: {} };
         if (!list) return out;
         // 선택지 -> 변수 대입 -> 나중에 변수 값으로 분기하는 메뉴 (지하철 노선 등): 변수 값 -> 그 선택지 조건
         const chVar = {};
@@ -462,9 +462,12 @@
                 case 301:
                     out.battle = true;
                     break;
+                case 129: // 파티원 추가 (동행)
+                    if (p[1] === 0 && !out.partyAdd[p[0]]) out.partyAdd[p[0]] = conds();
+                    break;
                 case 121:
                     if (p[2] === 1) { out.swOff = out.swOff || []; for (let v = p[0]; v <= p[1] && out.swOff.length < 24; v++) if (!out.swOff.includes(v)) out.swOff.push(v); }
-                    if (p[2] === 0) for (let v = p[0]; v <= p[1] && out.swOn.length < 24; v++) if (!out.swOn.includes(v)) out.swOn.push(v);
+                    if (p[2] === 0) for (let v = p[0]; v <= p[1] && out.swOn.length < 24; v++) { if (!out.swOn.includes(v)) out.swOn.push(v); if (!out.swCond[v]) out.swCond[v] = conds(); }
                     if (p[2] === 0) { out.changes = true; if (depth === 0) { out.dchanges = true; out.dsw = true; } effect(); }
                     break;
                 case 122:
@@ -559,6 +562,8 @@
                         if (ce.changes) out.changes = true;
                         if (ce.danger) out.danger = true;
                         for (const v of (ce.swOn || [])) if (out.swOn.length < 24 && !out.swOn.includes(v)) out.swOn.push(v);
+                        for (const v in (ce.swCond || {})) if (!out.swCond[v]) out.swCond[v] = c0.concat(ce.swCond[v]);
+                        for (const a in (ce.partyAdd || {})) if (!out.partyAdd[a]) out.partyAdd[a] = c0.concat(ce.partyAdd[a]);
                         for (const q of (ce.quest || [])) if (out.quest.length < 12) out.quest.push({ op: q.op, q: q.q, o: q.o, conds: c0.concat(q.conds) });
                         for (const vo of (ce.vops || [])) if (out.vops.length < 16) out.vops.push({ v: vo.v, op: vo.op, val: vo.val, conds: c0.concat(vo.conds) });
                         for (const st of (ce.stock || [])) if (out.stock.length < 80) out.stock.push(st);
@@ -595,7 +600,7 @@
     }
     function scanCommon(id, depth) {
         if (ceCache[id]) return ceCache[id];
-        ceCache[id] = { transfers: [], shop: null, msgs: 0, gain: false, battle: false, vars: [], changes: false, recover: false, gains: [], danger: false, selVars: [], wanted: [], swOn: [], stock: [], quest: [], vops: [] }; // 재귀 방지
+        ceCache[id] = { transfers: [], shop: null, msgs: 0, gain: false, battle: false, vars: [], changes: false, recover: false, gains: [], danger: false, selVars: [], wanted: [], swOn: [], stock: [], quest: [], vops: [], swCond: {}, partyAdd: {} }; // 재귀 방지
         const ce = $dataCommonEvents[id];
         const r = ce ? scanList(ce.list, depth) : ceCache[id];
         if (ce && DANGER_CE_RE.test(ce.name || '')) r.danger = true;
@@ -696,6 +701,12 @@
             for (const ce of $dataCommonEvents) if (ce) addStock(scanCommon(ce.id, 1).stock || []);
             // 스위치를 켜는 이벤트 색인 (본편 목표 역추적용)
             this.switchSetters = {};
+            // 파티에 캐릭터를 넣는 이벤트 (동행)
+            this.partySetters = {};
+            for (const id in this.maps) for (const ev of this.maps[id].events) {
+                if (ev.template) continue;
+                ev.pages.forEach((pg, pi) => { for (const a in (pg.partyAdd || {})) (this.partySetters[a] = this.partySetters[a] || []).push({ map: Number(id), evId: ev.id, page: pi, conds: pg.partyAdd[a] }); });
+            }
             // 이벤트 페이지 출현 조건에 쓰이는 변수 = 스토리 진행 변수 (대화 단계 등)
             this.condVars = new Set();
             for (const id in this.maps) for (const ev of this.maps[id].events) for (const pg of ev.pages) if (pg.cond.variableValid) this.condVars.add(pg.cond.variableId);
@@ -1337,7 +1348,7 @@
             vars: s.vars, changes: s.changes, recover: s.recover, dmsgs: s.dmsgs, dchanges: s.dchanges, gains: s.gains,
             danger: s.danger || s.transfers.some(t => Index.endingMaps && Index.endingMaps.has(t.map)),
             te: te, choices: s.choices, effects: s.effects, dsw: s.dsw, swOn: s.swOn, pmove: s.pmoves && s.pmoves.length ? null : (s.pmove || null), pmoves: s.pmoves || null, push: !!s.pushSelf, hev: !!s.hev, gainIds: s.gainIds, stock: s.stock,
-            ssOn: s.ssOn, loseIds: s.loseIds, quest: s.quest, vops: s.vops, ssExt: s.ssExt, ces: s.ces, swOff: s.swOff || [],
+            ssOn: s.ssOn, loseIds: s.loseIds, quest: s.quest, vops: s.vops, ssExt: s.ssExt, ces: s.ces, swOff: s.swOff || [], swCond: s.swCond, partyAdd: s.partyAdd,
             hb: Adapt.hitbox(cmt),
             // 적: 추격형(YEP_EventChasePlayer) 또는 총알 판정(<projEffect>, GALV_MapProjectiles)이 있고 접촉 시 발동하는 이벤트
             enemy: Adapt.isChaser(pg) || (/<projEffect>/i.test(cmt) && pg.trigger === 2 && !!(pg.image && pg.image.characterName)),
@@ -2480,6 +2491,11 @@
                     const prio = (q.main ? 0.6 : 0.8) + (r.op === 'objective' && r.o !== q.cur ? 0.05 : 0);
                     if (Index.activePage(map, ev) === raw) {
                         if (Cond.all(r.conds, r.map, r.evId) === false) continue;
+                        if (!byMap[r.map] && !items.some(i => i.quest === qkey)) {
+                            // 목표 장소로 가는 길이 막힘: 막는 조건을 분석해서 선행 할 일로
+                            try { const bi = this.blockedInfo(r.map, byMap, true, r.evId); if (bi && bi.failed) this.prereqItems(bi.failed, byMap, field, add, { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help: help + (bi.text ? ' / 막힌 곳: ' + bi.text : '') }); } catch (e) { /* 무시 */ }
+                            continue;
+                        }
                         if (raw.trigger <= 2) {
                             add({ quest: qkey, type: 'talk', cat: '퀘스트', prio, map: r.map, evId: r.evId, label, help, choices: (r.conds || []).filter(isChoiceCond).map(choiceToken) });
                         } else if (byMap[r.map] && r.map !== cur && !items.some(i => i.quest === qkey && i.map === r.map)) {
@@ -2489,12 +2505,7 @@
                         continue;
                     }
                     // 지금은 비활성 페이지: 출현 조건 스위치를 켜는 선행 이벤트 / 변수 조건이면 그 변수를 올리는 이벤트
-                    for (const c of Index.pageCondFails(raw.cond, r.map, r.evId)) {
-                        if (c.k === 'if' && c.p[0] === 1) { this.varPrereq(c.p[1], byMap, field, add, { quest: qkey, cat: '퀘스트', prio: prio + 0.15, label: label + ' (선행 단계)', help }); continue; }
-                        if (!(c.k === 'if' && c.p[0] === 0)) continue;
-                        const g = this.findSetter(c.p[1], byMap, field, 1);
-                        if (g) add({ quest: qkey, type: 'talk', cat: '퀘스트', prio: prio + 0.1, map: g.map, evId: g.evId, label: label + ' (선행 단계)', help });
-                    }
+                    this.prereqItems(Index.pageCondFails(raw.cond, r.map, r.evId), byMap, field, add, { quest: qkey, cat: '퀘스트', prio: prio + 0.1, label: label + ' (선행 단계)', help });
                 }
             }
 
@@ -2734,14 +2745,60 @@
                 const pg = Index.activePage(map, ev);
                 if (pg === raw && byMap[st.map]) {
                     const r = Planner.reach(st.map, st.evId, byMap, field);
-                    if (r.ok) return { map: st.map, evId: st.evId, hops: r.hops, depth };
+                    const sc = (raw.swCond && raw.swCond[sw]) || [];
+                    if (r.ok && Cond.all(sc.filter(c => !isChoiceCond(c)), st.map, st.evId) !== false) return { map: st.map, evId: st.evId, hops: r.hops, depth, choices: sc.filter(isChoiceCond).map(choiceToken) };
                 }
                 const c = raw.cond;
                 for (const id of [c.switch1Valid && c.switch1Id, c.switch2Valid && c.switch2Id]) {
                     if (id && !$gameSwitches.value(id)) { const r = this.findSetter(id, byMap, field, depth + 1, seen); if (r) return r; }
                 }
+                if (c.itemValid && !$gameParty.hasItem($dataItems[c.itemId])) { const r = this.findItem(c.itemId, byMap, field, depth + 1, seen); if (r) return r; }
             }
             return null;
+        },
+
+        // 아이템을 얻는 곳 (상점/이벤트). 획득 이벤트가 닫혀 있으면 그 조건을 거슬러 올라감
+        findItem(itemId, byMap, field, depth, seen) {
+            seen = seen || new Set();
+            const key = 'i' + itemId;
+            if (depth > 5 || seen.has(key)) return null;
+            seen.add(key);
+            const srcs = Index.itemSources(itemId).sort((a, b) => (a.kind === 'shop' ? 0 : 1) - (b.kind === 'shop' ? 0 : 1));
+            for (const sc of srcs) {
+                const map = Index.maps[sc.map], ev = Index.findEvent(sc.map, sc.evId), raw = ev && ev.pages[sc.page];
+                if (!raw || raw.danger) continue;
+                if (Index.activePage(map, ev) === raw && byMap[sc.map]) {
+                    const r = Planner.reach(sc.map, sc.evId, byMap, field);
+                    if (r.ok) return { map: sc.map, evId: sc.evId, hops: r.hops, depth, choices: [] };
+                }
+                for (const f of Index.pageCondFails(raw.cond, sc.map, sc.evId)) {
+                    let r = null;
+                    if (f.k === 'if' && f.p[0] === 0) r = this.findSetter(f.p[1], byMap, field, depth + 1, seen);
+                    else if (f.k === 'if' && f.p[0] === 8) r = this.findItem(f.p[1], byMap, field, depth + 1, seen);
+                    if (r) return r;
+                }
+            }
+            return null;
+        },
+
+        // 막힌 조건 목록 -> 선행 할 일 (스위치: 켜는 이벤트, 변수: 올리는 이벤트, 동료: 파티에 넣는 이벤트)
+        prereqItems(fails, byMap, field, add, base) {
+            for (const c of fails || []) {
+                if (c.k !== 'if') continue;
+                if ((c.p[0] === 0 && c.p[2] === 0 && !c.neg) || (c.p[0] === 8 && !c.neg)) {
+                    const g = c.p[0] === 0 ? this.findSetter(c.p[1], byMap, field, 1) : this.findItem(c.p[1], byMap, field, 1);
+                    if (g) add(Object.assign({ type: 'talk', map: g.map, evId: g.evId, choices: g.choices || [] }, base));
+                } else if (c.p[0] === 1) this.varPrereq(c.p[1], byMap, field, add, base);
+                else if (c.p[0] === 4 && !c.neg) {
+                    for (const st of (Index.partySetters[c.p[1]] || [])) {
+                        const map = Index.maps[st.map], ev = Index.findEvent(st.map, st.evId), raw = ev && ev.pages[st.page];
+                        if (!raw || raw.trigger > 2 || !byMap[st.map] || Index.activePage(map, ev) !== raw) continue;
+                        if (Cond.all(st.conds.filter(x => !isChoiceCond(x)), st.map, st.evId) === false) continue;
+                        add(Object.assign({ type: 'talk', map: st.map, evId: st.evId, choices: st.conds.filter(isChoiceCond).map(choiceToken) }, base, { label: base.label.replace('(선행 단계)', '(동행 데려가기)') }));
+                        break;
+                    }
+                }
+            }
         },
 
         // 변수 v를 올리는 이벤트 중 지금 할 수 있는 것을 추천 (최대 2개, 그 이벤트의 선택지 포함)
@@ -2969,6 +3026,8 @@
                 if (!exact) for (const m in by2) if (Index.rootId(Number(m)) === root && (!node || by2[m][0].cost < node.cost)) node = by2[m][0];
                 if (!node) return null;
                 for (const e of Planner.legsTo(node)) {
+                    // 시간대 같은 상태 스위치로만 막힌 곳은 시간이 지나면 풀리므로 다음 원인을 봄
+                    if (e.failed && e.failed.length && e.failed.every(c => c.k === 'if' && c.p[0] === 0 && Index.volatileSw && Index.volatileSw.has(c.p[1]))) continue;
                     if (e.failed && e.failed.length) {
                         return { leg: e, failed: e.failed, text: Index.maps[e.from].name + ' (' + e.ex + ',' + e.ey + '): ' + e.failed.map(c => Index.describeCond(c)).join(', ') };
                     }
