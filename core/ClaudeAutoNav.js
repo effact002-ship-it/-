@@ -696,6 +696,10 @@
             for (const ce of $dataCommonEvents) if (ce) addStock(scanCommon(ce.id, 1).stock || []);
             // 스위치를 켜는 이벤트 색인 (본편 목표 역추적용)
             this.switchSetters = {};
+            // 이벤트 페이지 출현 조건에 쓰이는 변수 = 스토리 진행 변수 (대화 단계 등)
+            this.condVars = new Set();
+            for (const id in this.maps) for (const ev of this.maps[id].events) for (const pg of ev.pages) if (pg.cond.variableValid) this.condVars.add(pg.cond.variableId);
+            for (const v of Object.keys(this.varItem || {})) this.condVars.delete(Number(v));
             // 변수를 올리는 이벤트 색인 (대화 단계 같은 변수 조건 역추적용)
             this.varSetters = {};
             for (const id in this.maps) for (const ev of this.maps[id].events) {
@@ -820,7 +824,7 @@
                     if (this.isPushable(fe)) { (set.push = set.push || new Map()).set(ge.y * map.w + ge.x, this.pushNo(fe)); continue; }
                     const ow = this.oneWayDir(fe);
                     if (ow) { (set.oneway = set.oneway || new Map()).set(ge.y * map.w + ge.x, ow); continue; }
-                    if (this.isOpenable(fe)) continue;
+                    if (this.isOpenable(fe) && this.canOpenNow(map, fe)) continue;
                     addTiles(set, ge.x, ge.y, liveHitbox(ge));
                 }
                 return set;
@@ -831,7 +835,7 @@
                 if (!pg || pg.prio !== 1 || !pg.fixed || pg.transfers.length) continue;
                 const ow = this.oneWayDir(ev);
                 if (ow) { if (pg.faceDir) (set.oneway = set.oneway || new Map()).set(ev.y * map.w + ev.x, ow); continue; }
-                if (this.isOpenable(ev)) continue;
+                if (this.isOpenable(ev) && this.canOpenNow(map, ev)) continue;
                 addTiles(set, ev.x, ev.y, pg.hb || ev.hb);
             }
             return set;
@@ -959,6 +963,18 @@
             if (ev.template) return !!TPL_BREAK && TPL_BREAK.test(ev.name) && ev.pages.some(p => p.through) && ev.pages.some(p => p.prio === 1 && !p.through && p.trigger <= 2);
             if (ev.pages.some(p => p.transfers.length)) return false;
             return ev.pages.some(p => p.through || p.prio !== 1) && ev.pages.some(p => p.prio === 1 && !p.through);
+        },
+
+        // 지금 조사하면 실제로 열리는 문인지: 현재 페이지가 통과 가능하거나, 현재 페이지가 켜는 (셀프) 스위치가 열린 페이지의 조건
+        canOpenNow(map, ev) {
+            if (!ev || ev.template || this.oneWayDir(ev)) return true;
+            const act = this.activePage(map, ev);
+            if (!act) return true;
+            if (act.through || act.prio !== 1) return true;
+            return ev.pages.some(p => p !== act && (p.through || p.prio !== 1) && (
+                (p.cond.selfSwitchValid && (act.ssOn || []).includes(p.cond.selfSwitchCh)) ||
+                (p.cond.switch1Valid && (act.swOn || []).includes(p.cond.switch1Id)) ||
+                (p.cond.switch2Valid && (act.swOn || []).includes(p.cond.switch2Id))));
         },
 
         isCollectPage(ev, pg, mapId) {
@@ -1907,7 +1923,7 @@
                 const k = ge.y * w + ge.x;
                 if (this._lockedDoors && this._lockedDoors.has(mapId + ':' + k)) continue;
                 const fe = Index.findEvent(mapId, ge.eventId());
-                if (Index.isOpenable(fe)) {
+                if (Index.isOpenable(fe) && Index.canOpenNow(Index.maps[mapId], fe)) {
                     const ow = Index.oneWayDir(fe);
                     for (const [tx, ty] of hbTiles(ge.x, ge.y, liveHitbox(ge))) {
                         if (!$gameMap.isValid(tx, ty)) continue;
@@ -2534,6 +2550,17 @@
                         add({ type: 'talk', cat: '이벤트', prio: 2, map: mid, evId: ev.id,
                             label: '[이벤트] ' + (nm || map.name), help: '아직 진행하지 않은 이벤트입니다. (대사 ' + pg.dmsgs + '개' + (pg.battle ? ', 전투 포함' : '') + ')' });
                         continue;
+                    }
+                    // 진행 대화: 스토리 진행 변수(페이지 출현 조건에 쓰이는 변수)를 올리는 대화. 그 분기의 선택지까지 자동
+                    if (!done && pg.trigger === 0 && (pg.vops || []).length && Index.condVars) {
+                        const prog = pg.vops.find(o => (o.op === 0 || (o.op === 1 && o.val > 0)) && Index.condVars.has(o.v) &&
+                            Cond.all(o.conds.filter(c => !isChoiceCond(c)), mid, ev.id) !== false &&
+                            !o.conds.some(c => c.k === 'choice' && PROF.botSleepChoiceRe && PROF.botSleepChoiceRe.test(c.text)));
+                        if (prog) {
+                            add({ type: 'talk', cat: '대화', prio: 2.4, map: mid, evId: ev.id, choices: prog.conds.filter(isChoiceCond).map(choiceToken),
+                                label: '[대화] ' + (okName(nm) || 'NPC') + ' (진행)', help: '이야기가 진행되는 대화입니다.' });
+                            continue;
+                        }
                     }
                     // 조사 지점: 조사/접촉하면 스위치·셀프 스위치가 바뀌는 이벤트. 그 결과로 컷신/획득/이동이 열리면 중요
                     if (!done && pg.n > 1 && (pg.ssOn.length || pg.swOn.length) && !pg.transfers.length && !pg.battle && !pg.enemy) {
@@ -4104,7 +4131,7 @@
             } else if (a.type === 'pickupAll') opts = { mode: 'pickup', queue: a.evIds };
             else if (a.type === 'pickup') opts = { mode: 'pickup', queue: [a.evId] };
             else if (a.type === 'exit') opts = { mode: 'talk', queue: [a.evId], exitTo: a.to };
-            else if (a.kind === 'act' && a.type !== 'go') opts = { mode: 'talk', queue: [a.evId] };
+            else if (a.kind === 'act' && a.type !== 'go') opts = { mode: 'talk', queue: [a.evId], choices: a.choices || [] };
             Runner.start(plan, label, opts);
             this.popScene();
         }
