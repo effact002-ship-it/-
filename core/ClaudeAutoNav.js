@@ -2421,6 +2421,9 @@
         set dash(v) { ConfigManager.navDash = !!v; ConfigManager.save(); },
         get sidePick() { return ConfigManager.navSidePick !== false; },
         set sidePick(v) { ConfigManager.navSidePick = !!v; ConfigManager.save(); },
+        // 봇 실행 중 게임 배속 (1/2/3/5/10)
+        get botSpeed() { return [1, 2, 3, 5, 10].includes(ConfigManager.navBotSpeed) ? ConfigManager.navBotSpeed : 1; },
+        set botSpeed(v) { ConfigManager.navBotSpeed = v; ConfigManager.save(); },
         sideRange: 5,
         textWait: 80
     };
@@ -2434,8 +2437,25 @@
         c.navSidePick = this.navSidePick !== false;
         c.navDash = this.navDash !== false;
         c.navAmbush = this.navAmbush || 'safe';
+        c.navBotSpeed = this.navBotSpeed || 1;
         return c;
     };
+    // 봇 배속: 봇이 켜져 있을 때만 게임 시간을 빠르게 흐르게 함 (MV: 프레임 시간, MZ: 갱신 횟수)
+    const navSpeed = () => (typeof Bot !== 'undefined' && Bot.active) ? NavCfg.botSpeed : 1;
+    if (SceneManager._getTimeInMsWithoutMobileSafari) {
+        const _t = SceneManager._getTimeInMsWithoutMobileSafari;
+        let lastReal = null, virt = 0;
+        SceneManager._getTimeInMsWithoutMobileSafari = function() {
+            const now = _t.call(this);
+            if (lastReal === null) { lastReal = now; virt = now; }
+            virt += (now - lastReal) * navSpeed(); lastReal = now;
+            return virt;
+        };
+    }
+    if (SceneManager.determineRepeatNumber) {
+        const _drn = SceneManager.determineRepeatNumber;
+        SceneManager.determineRepeatNumber = function(deltaTime) { return _drn.call(this, deltaTime * navSpeed()); };
+    }
     const _ConfigManager_applyData = ConfigManager.applyData;
     ConfigManager.applyData = function(c) {
         _ConfigManager_applyData.call(this, c);
@@ -4139,6 +4159,7 @@
         helpAreaHeight() { return IS_MZ ? this.calcWindowHeight(2, false) : Window_Base.prototype.fittingHeight(2); }
         cfgLabel(key) {
             if (key === 'ambush') return '[설정] 적 기습: ' + ({ off: '게임 그대로', safe: '기습 방지', pre: '항상 선제공격' })[NavCfg.ambush];
+            if (key === 'botSpeed') return '[설정] 봇 실행 중 게임 배속: x' + NavCfg.botSpeed;
             if (key === 'dash') return '[설정] 자동 이동 시 달리기: ' + (NavCfg.dash ? '켜짐' : '꺼짐');
             if (key === 'sidePick') return '[설정] 지나가며 근처 아이템 줍기: ' + (NavCfg.sidePick ? '켜짐' : '꺼짐');
             if (key === 'allowTraps') return '[설정] 함정/기믹 칸 통과: ' + (NavCfg.allowTraps ? '다른 길 없으면 허용' : '금지');
@@ -4170,6 +4191,7 @@
                 help: '메인 퀘스트와 진행 중인 서브 퀘스트를 퀘스트 단위로 보여줍니다.\n고른 퀘스트는 끝날 때까지 자동으로 이어서 진행합니다.'
             }];
             const tail = [
+                { kind: 'cfg', key: 'botSpeed', label: this.cfgLabel('botSpeed'), help: '봇이 켜져 있는 동안 게임 전체 속도를 올립니다. (x1 → x2 → x3 → x5 → x10)\n봇을 끄면 원래 속도로 돌아옵니다. 컴퓨터 성능에 따라 실제 배속은 낮을 수 있습니다.' },
                 { kind: 'cfg', key: 'autoText', label: this.cfgLabel('autoText'), help: '자동 진행 중 실행된 이벤트의 대사를 자동으로 넘깁니다.\n선택지는 직접 고릅니다.' },
                 { kind: 'cfg', key: 'ambush', label: this.cfgLabel('ambush'), help: '적 심볼과 부딪혔을 때의 판정입니다.\n기습 방지: 뒤를 잡혀도 일반 전투 / 항상 선제: 언제나 선제공격 / 끔: 게임 그대로' },
                 { kind: 'cfg', key: 'dash', label: this.cfgLabel('dash'), help: '자동 이동할 때 달려서 이동합니다. (달리기 금지 맵은 제외)' },
@@ -4244,6 +4266,7 @@
             }
             if (d.kind === 'cfg') {
                 if (d.key === 'doorMode') NavCfg.doorMode = ({ ask: 'pick', pick: 'force', force: 'ask' })[NavCfg.doorMode];
+                else if (d.key === 'botSpeed') NavCfg.botSpeed = ({ 1: 2, 2: 3, 3: 5, 5: 10, 10: 1 })[NavCfg.botSpeed] || 1;
                 else if (d.key === 'ambush') NavCfg.ambush = ({ safe: 'pre', pre: 'off', off: 'safe' })[NavCfg.ambush] || 'safe';
                 else NavCfg[d.key] = !NavCfg[d.key];
                 d.label = this.cfgLabel(d.key);
